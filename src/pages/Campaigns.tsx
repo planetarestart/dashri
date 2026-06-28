@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, ChevronRight, AlertCircle, Search, WifiOff, History, DollarSign, Power, ImageIcon, Plus, Clock } from 'lucide-react'
+import { ChevronDown, ChevronRight, AlertCircle, Search, WifiOff, History, DollarSign, Power, ImageIcon, Plus, Clock, Pencil, Check, X, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -116,7 +116,7 @@ const INSIGHT_FIELDS =
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const COLS = [
-  'Nome', 'Status', 'Gasto', 'Compras', 'Receita', 'ROAS', 'CPA',
+  'Nome', 'Status', 'Orçamento/dia', 'Gasto', 'Compras', 'Receita', 'ROAS', 'CPA',
   'Inic. Checkout', 'CPM', 'CPC', 'CTR', 'Impressões', 'Cliques', 'Freq.',
 ]
 
@@ -172,6 +172,7 @@ function AdRow({ ad }: { ad: FbAd }) {
         </div>
       </td>
       <td className="px-3 py-2"><StatusBadge status={ad.status} /></td>
+      <td className="px-3 py-2 text-gray-600 text-sm">—</td>
       <InsightCells ins={ad.insights} />
     </tr>
   )
@@ -224,6 +225,7 @@ function AdSetRow({
           </div>
         </td>
         <td className="px-3 py-2.5"><StatusBadge status={adSet.status} /></td>
+        <td className="px-3 py-2.5 text-gray-600 text-sm">—</td>
         <InsightCells ins={adSet.insights} />
       </tr>
       {open && loading && (
@@ -245,15 +247,20 @@ function CampaignRow({
   token: string
   datePreset: string
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]     = useState(false)
   const [adSets, setAdSets] = useState<FbAdSet[]>(campaign.adSets ?? [])
   const [loading, setLoading] = useState(false)
+
+  const [budget, setBudget]         = useState(campaign.daily_budget)
+  const [editing, setEditing]       = useState(false)
+  const [budgetInput, setBudgetInput] = useState('')
+  const [saving, setSaving]         = useState(false)
+  const [budgetErr, setBudgetErr]   = useState('')
 
   async function handleExpand() {
     const next = !open
     setOpen(next)
     if (!next || adSets.length > 0) return
-
     setLoading(true)
     try {
       const data = await fbFetch(
@@ -268,6 +275,40 @@ function CampaignRow({
       })))
     } catch { /* show empty */ }
     setLoading(false)
+  }
+
+  function startEdit(e: { stopPropagation(): void }) {
+    e.stopPropagation()
+    setBudgetInput(budget > 0 ? String(budget) : '')
+    setBudgetErr('')
+    setEditing(true)
+  }
+
+  function cancelEdit(e: { stopPropagation(): void }) {
+    e.stopPropagation()
+    setEditing(false)
+  }
+
+  async function saveBudget(e: { stopPropagation(): void }) {
+    e.stopPropagation()
+    const val = parseFloat(budgetInput.replace(',', '.'))
+    if (isNaN(val) || val <= 0) { setBudgetErr('Valor inválido'); return }
+    setSaving(true)
+    setBudgetErr('')
+    try {
+      const body = new URLSearchParams({
+        daily_budget: String(Math.round(val * 100)),
+        access_token: token,
+      })
+      const res  = await fetch(`https://graph.facebook.com/v19.0/${campaign.id}`, { method: 'POST', body })
+      const data = await res.json() as Record<string, unknown>
+      if (data.error) throw new Error((data.error as Record<string, string>).message)
+      setBudget(val)
+      setEditing(false)
+    } catch (err) {
+      setBudgetErr(String(err).replace('Error: ', ''))
+    }
+    setSaving(false)
   }
 
   return (
@@ -287,6 +328,54 @@ function CampaignRow({
           </div>
         </td>
         <td className="px-3 py-3"><StatusBadge status={campaign.status} /></td>
+
+        {/* ─── Orçamento editável ─── */}
+        <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          {editing ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <div className="relative">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#7AA880]">R$</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={budgetInput}
+                    onChange={e => setBudgetInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveBudget(e); if (e.key === 'Escape') cancelEdit(e) }}
+                    className="w-24 pl-7 pr-2 py-1 bg-[#081208] border border-[#4DB848] rounded text-sm text-white focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  onClick={saveBudget}
+                  disabled={saving}
+                  className="p-1 rounded hover:bg-[#4DB848]/20 text-[#4DB848] disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                </button>
+                <button onClick={cancelEdit} className="p-1 rounded hover:bg-red-500/20 text-red-400">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {budgetErr && <p className="text-[10px] text-red-400 max-w-[140px] leading-tight">{budgetErr}</p>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 group/bud">
+              <span className="text-[#C8900A] text-sm font-mono">
+                {budget > 0 ? formatCurrency(budget) : '—'}
+              </span>
+              <button
+                onClick={startEdit}
+                className="opacity-0 group-hover/bud:opacity-100 p-1 rounded hover:bg-[#1B3D20] text-[#7AA880] transition-opacity"
+                title="Editar orçamento"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </td>
+
         <InsightCells ins={campaign.insights} />
       </tr>
       {open && loading && (
