@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Kit Restart Intestinal palette */
+    --background:   135 80% 4%;
+    --foreground:   120 20% 92%;
+    --card:         135 60% 9%;
+    --card-foreground: 120 20% 92%;
+    --popover:      135 60% 9%;
+    --popover-foreground: 120 20% 92%;
+    --primary:      118 52% 48%;
+    --primary-foreground: 0 0% 98%;
+    --secondary:    135 40% 12%;
+    --secondary-foreground: 120 15% 85%;
+    --muted:        135 35% 11%;
+    --muted-foreground: 130 18% 50%;
+    --accent:       38 90% 40%;
+    --accent-foreground: 0 0% 98%;
+    --destructive:  20 70% 48%;
+    --destructive-foreground: 0 0% 98%;
+    --border:       135 40% 17%;
+    --input:        135 40% 17%;
+    --ring:         118 52% 48%;
+    --radius:       0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    background-color: #061409;
+    color: #E0EEE0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+
+  #root {
+    width: 100%;
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #1B3D20 transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #1B3D20;
+    border-radius: 3px;
+  }
+}
