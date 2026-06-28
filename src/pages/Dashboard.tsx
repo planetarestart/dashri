@@ -113,16 +113,16 @@ function MetricCard({ label, value, variation, loading }: MetricCardProps) {
   }
   return (
     <Card className="hover:border-[#4DB848]/30 transition-colors">
-      <CardContent className="p-5">
-        <span className="text-xs text-[#7AA880] font-medium uppercase tracking-wide block mb-3">{label}</span>
-        <p className="text-2xl font-bold text-[#E0EEE0] mb-1">{value}</p>
+      <CardContent className="p-4">
+        <span className="text-[10px] text-[#7AA880] font-semibold uppercase tracking-wider block mb-2 leading-tight">{label}</span>
+        <p className="text-lg font-bold text-[#E0EEE0] mb-1 leading-tight truncate">{value}</p>
         {variation !== null ? (
-          <div className={`flex items-center gap-1 text-xs font-medium ${color}`}>
-            <Arrow className="w-3.5 h-3.5" />
-            <span>{Math.abs(variation).toFixed(1)}% vs período anterior</span>
+          <div className={`flex items-center gap-1 text-[10px] font-medium ${color}`}>
+            <Arrow className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{Math.abs(variation).toFixed(1)}% anterior</span>
           </div>
         ) : (
-          <div className="text-xs text-[#4A6E52]">período completo</div>
+          <div className="text-[10px] text-[#4A6E52]">período completo</div>
         )}
       </CardContent>
     </Card>
@@ -343,7 +343,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         {loading
           ? [...Array(7)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
