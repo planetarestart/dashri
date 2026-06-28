@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, ChevronRight, AlertCircle, Search, WifiOff } from 'lucide-react'
+import { ChevronDown, ChevronRight, AlertCircle, Search, WifiOff, History, DollarSign, Power, ImageIcon, Plus, Clock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -303,6 +303,211 @@ function CampaignRow({
   )
 }
 
+// ─── Change History ───────────────────────────────────────────────────────────
+
+interface ActivityEntry {
+  event_time: string | number  // ISO string ou Unix timestamp
+  event_type: string
+  object_name: string
+  object_type: string
+  extra_data: string
+  translated_event_type: string
+}
+
+// Facebook retorna event_time como ISO string ou Unix timestamp dependendo da versão
+function parseEventTime(et: string | number): Date {
+  if (typeof et === 'number') return new Date(et * 1000)
+  const asNum = Number(et)
+  if (!isNaN(asNum) && asNum > 1_000_000_000) return new Date(asNum * 1000)
+  return new Date(et) // ISO 8601 string
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  update_campaign_budget:     'Orçamento de campanha alterado',
+  update_campaign_run_status: 'Status de campanha alterado',
+  create_campaign:            'Campanha criada',
+  update_ad_creative:         'Criativo atualizado',
+  create_ad_creative:         'Novo criativo criado',
+  create_ad:                  'Anúncio criado',
+  update_ad_run_status:       'Status de anúncio alterado',
+  update_ad_name:             'Nome do anúncio alterado',
+  create_ad_set:              'Conjunto de anúncios criado',
+  update_ad_set_budget:       'Orçamento do conjunto alterado',
+  update_ad_set_run_status:   'Status do conjunto alterado',
+  update_ad_bid_amount:       'Lance de anúncio alterado',
+}
+
+const EVENT_STYLE: Record<string, { tag: string; dot: string; icon: React.ReactNode }> = {
+  update_campaign_budget:     { tag: 'text-[#C8900A] bg-[#C8900A]/10 border-[#C8900A]/20', dot: 'bg-[#C8900A]', icon: <DollarSign className="w-3 h-3" /> },
+  update_ad_set_budget:       { tag: 'text-[#C8900A] bg-[#C8900A]/10 border-[#C8900A]/20', dot: 'bg-[#C8900A]', icon: <DollarSign className="w-3 h-3" /> },
+  update_ad_bid_amount:       { tag: 'text-[#C8900A] bg-[#C8900A]/10 border-[#C8900A]/20', dot: 'bg-[#C8900A]', icon: <DollarSign className="w-3 h-3" /> },
+  update_campaign_run_status: { tag: 'text-[#D45820] bg-[#D45820]/10 border-[#D45820]/20', dot: 'bg-[#D45820]', icon: <Power className="w-3 h-3" /> },
+  update_ad_run_status:       { tag: 'text-[#D45820] bg-[#D45820]/10 border-[#D45820]/20', dot: 'bg-[#D45820]', icon: <Power className="w-3 h-3" /> },
+  update_ad_set_run_status:   { tag: 'text-[#D45820] bg-[#D45820]/10 border-[#D45820]/20', dot: 'bg-[#D45820]', icon: <Power className="w-3 h-3" /> },
+  update_ad_creative:         { tag: 'text-[#4DB848] bg-[#4DB848]/10 border-[#4DB848]/20', dot: 'bg-[#4DB848]', icon: <ImageIcon className="w-3 h-3" /> },
+  create_ad_creative:         { tag: 'text-[#4DB848] bg-[#4DB848]/10 border-[#4DB848]/20', dot: 'bg-[#4DB848]', icon: <ImageIcon className="w-3 h-3" /> },
+  create_campaign:            { tag: 'text-[#7FCC5E] bg-[#7FCC5E]/10 border-[#7FCC5E]/20', dot: 'bg-[#7FCC5E]', icon: <Plus className="w-3 h-3" /> },
+  create_ad_set:              { tag: 'text-[#7FCC5E] bg-[#7FCC5E]/10 border-[#7FCC5E]/20', dot: 'bg-[#7FCC5E]', icon: <Plus className="w-3 h-3" /> },
+  create_ad:                  { tag: 'text-[#7FCC5E] bg-[#7FCC5E]/10 border-[#7FCC5E]/20', dot: 'bg-[#7FCC5E]', icon: <Plus className="w-3 h-3" /> },
+}
+
+const OBJ_TYPE_LABEL: Record<string, string> = {
+  CAMPAIGN: 'Campanha', CAMPAIGN_GROUP: 'Campanha', AD_SET: 'Conjunto', AD: 'Anúncio', AD_CREATIVE: 'Criativo',
+}
+
+function extractNumeric(val: unknown): number | null {
+  if (val === null || val === undefined) return null
+  if (typeof val === 'number') return val
+  if (typeof val === 'string') { const n = parseFloat(val); return isNaN(n) ? null : n }
+  if (typeof val === 'object') {
+    // extra_data de orçamento: {"amount": 5000, "currency": "BRL"} ou {"daily_budget": "5000"}
+    const obj = val as Record<string, unknown>
+    for (const k of ['amount', 'daily_budget', 'lifetime_budget', 'budget', 'value', 'bid_amount']) {
+      const n = parseFloat(String(obj[k] ?? ''))
+      if (!isNaN(n)) return n
+    }
+    // qualquer campo numérico positivo
+    for (const v of Object.values(obj)) {
+      const n = parseFloat(String(v))
+      if (!isNaN(n) && n > 0) return n
+    }
+  }
+  return null
+}
+
+function stringify(val: unknown): string {
+  if (val === null || val === undefined) return '?'
+  if (typeof val === 'object') {
+    const obj = val as Record<string, unknown>
+    // tentar pegar campo de texto legível
+    for (const k of ['name', 'label', 'status', 'value', 'text']) {
+      if (typeof obj[k] === 'string') return String(obj[k])
+    }
+    return JSON.stringify(val)
+  }
+  return String(val)
+}
+
+function parseExtraData(raw: string, eventType: string): string {
+  if (!raw) return ''
+  try {
+    const data = JSON.parse(raw) as Record<string, unknown>
+    const before = data.before ?? data.old_value ?? data.prev_value
+    const after  = data.after  ?? data.new_value ?? data.current_value
+    if (before !== undefined && after !== undefined) {
+      if (eventType.includes('budget') || eventType.includes('bid')) {
+        const bNum = extractNumeric(before)
+        const aNum = extractNumeric(after)
+        if (bNum !== null && aNum !== null) {
+          const fmt = (n: number) => (n / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          return `${fmt(bNum)} → ${fmt(aNum)}`
+        }
+      }
+      return `${stringify(before)} → ${stringify(after)}`
+    }
+    if (data.ad_creative_id) return `ID: ${data.ad_creative_id}`
+    return ''
+  } catch { return '' }
+}
+
+function ChangeHistory({ token, accountId }: { token: string; accountId: string }) {
+  const [activities, setActivities] = useState<ActivityEntry[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [period, setPeriod]         = useState('last_7d')
+
+  useEffect(() => {
+    if (!token || !accountId) return
+    setLoading(true)
+    fbFetch(
+      `https://graph.facebook.com/v19.0/act_${accountId}/activities` +
+      `?fields=event_time,event_type,object_name,object_type,extra_data,translated_event_type` +
+      `&date_preset=${period}&limit=100&access_token=${token}`
+    )
+      .then(data => setActivities((data.data as ActivityEntry[]) ?? []))
+      .catch(() => setActivities([]))
+      .finally(() => setLoading(false))
+  }, [token, accountId, period])
+
+  const grouped: Record<string, ActivityEntry[]> = {}
+  activities.forEach(a => {
+    const d = parseEventTime(a.event_time)
+    const key = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+    if (!grouped[key]) grouped[key] = []
+    grouped[key].push(a)
+  })
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#1B3D20]">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-[#4DB848]" />
+            <span className="text-sm font-semibold text-[#E0EEE0]">Histórico de Alterações</span>
+          </div>
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="yesterday">Ontem</SelectItem>
+              <SelectItem value="last_7d">Últimos 7 dias</SelectItem>
+              <SelectItem value="last_30d">Últimos 30 dias</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {loading ? (
+          <div className="p-4 space-y-3">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+          </div>
+        ) : activities.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-12">
+            <Clock className="w-8 h-8 text-[#1B3D20]" />
+            <p className="text-sm text-[#4A6E52]">Nenhuma alteração encontrada no período.</p>
+          </div>
+        ) : (
+          <div>
+            {Object.entries(grouped).map(([date, entries]) => (
+              <div key={date}>
+                <div className="px-4 py-1.5 bg-[#081208] border-b border-[#1B3D20]">
+                  <span className="text-[11px] font-semibold text-[#7AA880] uppercase tracking-wider">{date}</span>
+                </div>
+                {entries.map((entry, i) => {
+                  const label    = EVENT_LABELS[entry.event_type] ?? entry.translated_event_type ?? entry.event_type
+                  const style    = EVENT_STYLE[entry.event_type]
+                  const tagCls   = style?.tag ?? 'text-[#7AA880] bg-[#1B3D20]/50 border-[#1B3D20]'
+                  const dotCls   = style?.dot ?? 'bg-[#4A6E52]'
+                  const detail   = parseExtraData(entry.extra_data ?? '{}', entry.event_type)
+                  const dd       = parseEventTime(entry.event_time)
+                  const time     = `${String(dd.getHours()).padStart(2,'0')}:${String(dd.getMinutes()).padStart(2,'0')}`
+                  const objLabel = OBJ_TYPE_LABEL[entry.object_type] ?? entry.object_type
+                  return (
+                    <div key={i} className="flex items-start gap-3 px-4 py-3 border-b border-[#1B3D20]/40 hover:bg-[#142918]/30 transition-colors last:border-0">
+                      <div className="pt-2 flex-shrink-0">
+                        <div className={`w-2 h-2 rounded-full ${dotCls}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${tagCls}`}>
+                            {style?.icon}{label}
+                          </span>
+                          <span className="text-[10px] text-[#4A6E52]">{objLabel}</span>
+                          <span className="text-[10px] text-[#4A6E52] ml-auto font-mono">{time}</span>
+                        </div>
+                        <p className="text-sm text-[#E0EEE0] mt-0.5 truncate">{entry.object_name || '—'}</p>
+                        {detail && <p className="text-xs text-[#C8900A] mt-0.5 font-mono">{detail}</p>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Campaigns() {
@@ -460,6 +665,11 @@ export default function Campaigns() {
           )}
         </CardContent>
       </Card>
+
+      {/* Histórico de Alterações */}
+      {token && accountId && (
+        <ChangeHistory token={token} accountId={accountId} />
+      )}
     </div>
   )
 }
