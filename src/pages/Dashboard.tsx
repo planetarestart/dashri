@@ -33,7 +33,13 @@ interface TopCampaign { id: string; name: string; status: string; spend: number;
 
 function getPeriodDates(period: Period): { start: string; end: string; prev_start: string; prev_end: string } {
   const today = new Date()
-  const fmt = (d: Date) => d.toISOString().split('T')[0]
+  // usa data local (horário de Brasília), não UTC
+  const fmt = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
   const sub = (d: Date, days: number) => { const r = new Date(d); r.setDate(r.getDate() - days); return r }
 
   if (period === 'today') {
@@ -219,13 +225,14 @@ export default function Dashboard() {
 
     const fbMetrics = extractFbMetrics(fbAll?.data)
     const adSpend = fbMetrics.spend * 1.1215 // +12.15% imposto sobre anúncios
+    const acquisitions = sales.length > 0 ? sales.length : fbMetrics.purchases
 
     const currentKpis: KPIs = {
       grossRevenue,
       adSpend,
       sales: sales.length,
       roas: adSpend > 0 ? grossRevenue / adSpend : 0,
-      cpa: sales.length > 0 ? adSpend / sales.length : 0,
+      cpa: acquisitions > 0 ? adSpend / acquisitions : 0,
       roi: adSpend > 0 ? ((grossRevenue - adSpend) / adSpend) * 100 : 0,
       fbPurchases: fbMetrics.purchases,
     }
@@ -312,7 +319,8 @@ export default function Dashboard() {
   // ── Variation helpers ──
   const variation = (cur: number, prev: number): number | null => {
     if (period === 'maximum') return null
-    if (prev === 0) return cur > 0 ? 100 : 0
+    if (prev === 0 && cur === 0) return null
+    if (prev === 0) return cur > 0 ? 100 : -100
     return ((cur - prev) / prev) * 100
   }
 
