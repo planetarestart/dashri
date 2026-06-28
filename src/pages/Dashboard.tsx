@@ -18,6 +18,7 @@ type Period = 'today' | '7d' | '30d' | 'maximum'
 interface KPIs {
   grossRevenue: number
   adSpend: number
+  profit: number
   sales: number
   roas: number
   cpa: number
@@ -227,9 +228,14 @@ export default function Dashboard() {
     const adSpend = fbMetrics.spend * 1.1215 // +12.15% imposto sobre anúncios
     const acquisitions = sales.length > 0 ? sales.length : fbMetrics.purchases
 
+    // Lucro = Faturamento - taxa Monetizze 7.9% - Gasto com Ads (imposto incluso)
+    const profit     = grossRevenue - (grossRevenue * 0.079) - adSpend
+    const prevProfit = prevRevenue  - (prevRevenue  * 0.079)
+
     const currentKpis: KPIs = {
       grossRevenue,
       adSpend,
+      profit,
       sales: sales.length,
       roas: adSpend > 0 ? grossRevenue / adSpend : 0,
       cpa: acquisitions > 0 ? adSpend / acquisitions : 0,
@@ -238,7 +244,7 @@ export default function Dashboard() {
     }
     const prevKpisCalc: KPIs = {
       grossRevenue: prevRevenue,
-      adSpend: 0, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
+      adSpend: 0, profit: prevProfit, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
     }
 
     setKpis(currentKpis)
@@ -333,6 +339,7 @@ export default function Dashboard() {
   const metrics = kpis ? [
     { label: 'Faturamento Bruto', value: formatCurrency(kpis.grossRevenue), variation: variation(kpis.grossRevenue, prevKpis?.grossRevenue ?? 0) },
     { label: 'Gasto com Ads',     value: formatCurrency(kpis.adSpend),      variation: variation(kpis.adSpend, prevKpis?.adSpend ?? 0) },
+    { label: 'Lucro',             value: formatCurrency(kpis.profit),       variation: variation(kpis.profit, prevKpis?.profit ?? 0) },
     { label: 'ROI',               value: `${kpis.roi.toFixed(1)}%`,         variation: variation(kpis.roi, prevKpis?.roi ?? 0) },
     { label: 'ROAS',              value: `${kpis.roas.toFixed(2)}x`,        variation: variation(kpis.roas, prevKpis?.roas ?? 0) },
     { label: 'CPA',               value: formatCurrency(kpis.cpa),          variation: kpis.cpa > 0 ? variation(kpis.cpa, prevKpis?.cpa ?? 0) : null },
@@ -357,9 +364,9 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         {loading
-          ? [...Array(7)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
+          ? [...Array(8)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
         }
       </div>
