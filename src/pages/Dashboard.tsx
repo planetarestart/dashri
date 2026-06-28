@@ -46,15 +46,15 @@ function getPeriodDates(period: Period): { start: string; end: string; prev_star
     return { start: fmt(today), end: fmt(today), prev_start: fmt(sub(today, 1)), prev_end: fmt(sub(today, 1)) }
   }
   if (period === '7d') {
-    const start = sub(today, 6)
-    const prevEnd = sub(today, 7)
-    const prevStart = sub(today, 13)
+    const start = sub(today, 7)
+    const prevEnd = sub(today, 8)
+    const prevStart = sub(today, 14)
     return { start: fmt(start), end: fmt(today), prev_start: fmt(prevStart), prev_end: fmt(prevEnd) }
   }
   if (period === '30d') {
-    const start = sub(today, 29)
-    const prevEnd = sub(today, 30)
-    const prevStart = sub(today, 59)
+    const start = sub(today, 30)
+    const prevEnd = sub(today, 31)
+    const prevStart = sub(today, 60)
     return { start: fmt(start), end: fmt(today), prev_start: fmt(prevStart), prev_end: fmt(prevEnd) }
   }
   return { start: '2020-01-01', end: fmt(today), prev_start: '2010-01-01', prev_end: '2019-12-31' }
@@ -258,7 +258,13 @@ export default function Dashboard() {
       })
     }
 
-    const allDates = [...new Set([...Object.keys(revenueByDate), ...Object.keys(spendByDate)])].sort()
+    // exclui hoje do gráfico: Facebook fecha o gasto do dia atual com ~1 dia de delay
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+    const allDates = [...new Set([...Object.keys(revenueByDate), ...Object.keys(spendByDate)])]
+      .filter(d => d < todayStr)
+      .sort()
+
     const chartPoints: ChartPoint[] = allDates.slice(-30).map(d => ({
       date: d.slice(5),
       revenue: revenueByDate[d] ?? 0,
