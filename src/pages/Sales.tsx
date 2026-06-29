@@ -9,6 +9,8 @@ import { supabase } from '@/lib/supabase'
 
 const ITEMS_PER_PAGE = 15
 
+type DatePreset = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'this_month' | 'last_month' | 'maximum'
+
 interface VendaRow {
   id: number
   data: string
@@ -29,9 +31,36 @@ interface VendaRow {
   metodo_de_pagamento: string
 }
 
+function getDateRange(preset: DatePreset): { start: string | null; end: string | null } {
+  const fmt = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  const sub = (d: Date, days: number) => { const r = new Date(d); r.setDate(r.getDate() - days); return r }
+  const today = new Date()
+
+  if (preset === 'today')      return { start: fmt(today),          end: fmt(today) }
+  if (preset === 'yesterday')  return { start: fmt(sub(today, 1)),  end: fmt(sub(today, 1)) }
+  if (preset === '7d')         return { start: fmt(sub(today, 7)),  end: fmt(today) }
+  if (preset === '14d')        return { start: fmt(sub(today, 14)), end: fmt(today) }
+  if (preset === '30d')        return { start: fmt(sub(today, 30)), end: fmt(today) }
+  if (preset === 'this_month') {
+    const s = new Date(today.getFullYear(), today.getMonth(), 1)
+    return { start: fmt(s), end: fmt(today) }
+  }
+  if (preset === 'last_month') {
+    const s = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+    const e = new Date(today.getFullYear(), today.getMonth(), 0)
+    return { start: fmt(s), end: fmt(e) }
+  }
+  return { start: null, end: null } // maximum
+}
+
 function PaymentBadge({ method }: { method: string }) {
   const m = (method ?? '').toLowerCase()
-  const isPix = m.includes('pix')
+  const isPix  = m.includes('pix')
   const isCard = m.includes('cart')
   const cls = isPix
     ? 'bg-[#C8900A]/20 text-[#C8900A] border-[#C8900A]/30'
@@ -61,36 +90,38 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 export default function Sales() {
-  const [allSales, setAllSales] = useState<VendaRow[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
+  const [allSales, setAllSales]   = useState<VendaRow[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState<string | null>(null)
+  const [datePreset, setDatePreset] = useState<DatePreset>('maximum')
 
-  const [search, setSearch]             = useState('')
-  const [paymentFilter, setPaymentFilter] = useState('all')
-  const [productFilter, setProductFilter] = useState('all')
-  const [page, setPage]                 = useState(1)
+  const [search, setSearch]                 = useState('')
+  const [paymentFilter, setPaymentFilter]   = useState('all')
+  const [productFilter, setProductFilter]   = useState('all')
+  const [page, setPage]                     = useState(1)
 
-  const fetchSales = useCallback(async () => {
+  const fetchSales = useCallback(async (preset: DatePreset) => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
+    const { start, end } = getDateRange(preset)
+
+    let query = supabase
       .from('vendas')
       .select('*')
       .order('data', { ascending: false })
       .order('horario', { ascending: false })
 
-    if (err) {
-      setError(err.message)
-      setLoading(false)
-      return
-    }
+    if (start) query = query.gte('data', start)
+    if (end)   query = query.lte('data', end)
+
+    const { data, error: err } = await query
+    if (err) { setError(err.message); setLoading(false); return }
     setAllSales((data ?? []) as VendaRow[])
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchSales() }, [fetchSales])
+  useEffect(() => { fetchSales(datePreset) }, [datePreset, fetchSales])
 
-  // Unique values for filters
   const uniquePayments = [...new Set(allSales.map(s => s.metodo_de_pagamento).filter(Boolean))]
   const uniqueProducts  = [...new Set(allSales.map(s => s.produto_comprado).filter(Boolean))]
 
@@ -129,6 +160,21 @@ export default function Sales() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Date preset */}
+          <Select value={datePreset} onValueChange={v => resetPage(() => setDatePreset(v as DatePreset))}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="yesterday">Ontem</SelectItem>
+              <SelectItem value="7d">Últimos 7 dias</SelectItem>
+              <SelectItem value="14d">Últimos 14 dias</SelectItem>
+              <SelectItem value="30d">Últimos 30 dias</SelectItem>
+              <SelectItem value="this_month">Este mês</SelectItem>
+              <SelectItem value="last_month">Mês passado</SelectItem>
+              <SelectItem value="maximum">Máximo</SelectItem>
+            </SelectContent>
+          </Select>
+
           <div className="relative">
             <Input
               placeholder="Buscar comprador, produto..."
