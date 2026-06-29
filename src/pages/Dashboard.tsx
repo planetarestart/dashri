@@ -18,6 +18,7 @@ type Period = 'today' | 'yesterday' | '7d' | '30d' | 'maximum' | 'custom'
 interface KPIs {
   grossRevenue: number
   adSpend: number
+  metaTax: number
   profit: number
   sales: number
   roas: number
@@ -243,7 +244,8 @@ export default function Dashboard() {
     const prevRevenue  = prevSalesArr.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
 
     const fbMetrics = extractFbMetrics(fbAll?.data)
-    const adSpend = fbMetrics.spend * 1.1215 // +12.15% imposto sobre anúncios
+    const adSpend   = fbMetrics.spend * 1.1215 // +12.15% imposto sobre anúncios
+    const metaTax   = fbMetrics.spend * 0.1215 // só o imposto Meta
     const acquisitions = sales.length > 0 ? sales.length : fbMetrics.purchases
 
     // Lucro = Faturamento - taxa Monetizze 7.9% - Gasto com Ads (imposto incluso)
@@ -253,6 +255,7 @@ export default function Dashboard() {
     const currentKpis: KPIs = {
       grossRevenue,
       adSpend,
+      metaTax,
       profit,
       sales: sales.length,
       roas: adSpend > 0 ? grossRevenue / adSpend : 0,
@@ -262,7 +265,7 @@ export default function Dashboard() {
     }
     const prevKpisCalc: KPIs = {
       grossRevenue: prevRevenue,
-      adSpend: 0, profit: prevProfit, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
+      adSpend: 0, metaTax: 0, profit: prevProfit, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
     }
 
     setKpis(currentKpis)
@@ -370,6 +373,7 @@ export default function Dashboard() {
     { label: 'ROI',               value: `${kpis.roi.toFixed(1)}%`,         variation: variation(kpis.roi, prevKpis?.roi ?? 0) },
     { label: 'ROAS',              value: `${kpis.roas.toFixed(2)}x`,        variation: variation(kpis.roas, prevKpis?.roas ?? 0) },
     { label: 'CPA',               value: formatCurrency(kpis.cpa),          variation: kpis.cpa > 0 ? variation(kpis.cpa, prevKpis?.cpa ?? 0) : null },
+    { label: 'Imposto Meta',      value: formatCurrency(kpis.metaTax),      variation: null },
     { label: 'Vendas',            value: formatNumber(kpis.sales),          variation: variation(kpis.sales, prevKpis?.sales ?? 0) },
     { label: 'Compras FB',        value: formatNumber(kpis.fbPurchases),    variation: null },
   ] : []
@@ -421,9 +425,9 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3">
         {loading
-          ? [...Array(8)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
+          ? [...Array(9)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
         }
       </div>
