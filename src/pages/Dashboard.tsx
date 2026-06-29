@@ -13,7 +13,7 @@ import { supabase, getSetting } from '@/lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Period = 'today' | '7d' | '30d' | 'maximum'
+type Period = 'today' | 'yesterday' | '7d' | '30d' | 'maximum' | 'custom'
 
 interface KPIs {
   grossRevenue: number
@@ -32,9 +32,12 @@ interface TopCampaign { id: string; name: string; status: string; spend: number;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getPeriodDates(period: Period): { start: string; end: string; prev_start: string; prev_end: string } {
+function getPeriodDates(
+  period: Period,
+  customStart?: string,
+  customEnd?: string,
+): { start: string; end: string; prev_start: string; prev_end: string } {
   const today = new Date()
-  // usa data local (horário de Brasília), não UTC
   const fmt = (d: Date) => {
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -46,23 +49,29 @@ function getPeriodDates(period: Period): { start: string; end: string; prev_star
   if (period === 'today') {
     return { start: fmt(today), end: fmt(today), prev_start: fmt(sub(today, 1)), prev_end: fmt(sub(today, 1)) }
   }
+  if (period === 'yesterday') {
+    const y = sub(today, 1)
+    return { start: fmt(y), end: fmt(y), prev_start: fmt(sub(today, 2)), prev_end: fmt(sub(today, 2)) }
+  }
   if (period === '7d') {
-    const start = sub(today, 7)
-    const prevEnd = sub(today, 8)
-    const prevStart = sub(today, 14)
-    return { start: fmt(start), end: fmt(today), prev_start: fmt(prevStart), prev_end: fmt(prevEnd) }
+    return { start: fmt(sub(today, 7)), end: fmt(today), prev_start: fmt(sub(today, 14)), prev_end: fmt(sub(today, 8)) }
   }
   if (period === '30d') {
-    const start = sub(today, 30)
-    const prevEnd = sub(today, 31)
-    const prevStart = sub(today, 60)
-    return { start: fmt(start), end: fmt(today), prev_start: fmt(prevStart), prev_end: fmt(prevEnd) }
+    return { start: fmt(sub(today, 30)), end: fmt(today), prev_start: fmt(sub(today, 60)), prev_end: fmt(sub(today, 31)) }
+  }
+  if (period === 'custom' && customStart && customEnd) {
+    const s = new Date(customStart + 'T12:00:00')
+    const e = new Date(customEnd   + 'T12:00:00')
+    const diffDays = Math.round((e.getTime() - s.getTime()) / 86_400_000) + 1
+    return { start: customStart, end: customEnd, prev_start: fmt(sub(s, diffDays)), prev_end: fmt(sub(s, 1)) }
   }
   return { start: '2020-01-01', end: fmt(today), prev_start: '2010-01-01', prev_end: '2019-12-31' }
 }
 
-const FB_PRESET: Record<Period, string> = {
+// Para período custom usa time_range no lugar de date_preset
+const FB_PRESET: Record<Exclude<Period, 'custom'>, string> = {
   today: 'today',
+  yesterday: 'yesterday',
   '7d': 'last_7d',
   '30d': 'last_30d',
   maximum: 'maximum',
@@ -166,19 +175,29 @@ const PieTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ n
 
 export default function Dashboard() {
   const [period, setPeriod]           = useState<Period>('30d')
-  const [loading, setLoading]         = useState(true)
-  const [kpis, setKpis]               = useState<KPIs | null>(null)
-  const [prevKpis, setPrevKpis]       = useState<KPIs | null>(null)
-  const [chartData, setChartData]     = useState<ChartPoint[]>([])
-  const [sourceData, setSourceData]   = useState<SourcePoint[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [kpis, setKpis]                 = useState<KPIs | null>(null)
+  const [prevKpis, setPrevKpis]         = useState<KPIs | null>(null)
+  const [chartData, setChartData]       = useState<ChartPoint[]>([])
+  const [sourceData, setSourceData]     = useState<SourcePoint[]>([])
   const [topCampaigns, setTopCampaigns] = useState<TopCampaign[]>([])
+  const [customStart, setCustomStart]   = useState('')
+  const [customEnd, setCustomEnd]       = useState('')
 
-  const fetchAll = useCallback(async (p: Period) => {
+  const fetchAll = useCallback(async (p: Period, cs?: string, ce?: string) => {
     setLoading(true)
-    const { start, end, prev_start, prev_end } = getPeriodDates(p)
-    const preset = FB_PRESET[p]
+    const { start, end, prev_start, prev_end } = getPeriodDates(p, cs, ce)
     const token  = getSetting('facebook_token')
     const accId  = getSetting('facebook_ad_account_id')
+
+    // Parâmetro de tempo para a API do Facebook
+    const isCustom = p === 'custom'
+    const fbTimeParam   = isCustom
+      ? `time_range={"since":"${start}","until":"${end}"}`
+      : `date_preset=${FB_PRESET[p as Exclude<Period,'custom'>]}`
+    const fbDailyParam  = (isCustom || p === 'maximum')
+      ? (isCustom ? `time_range={"since":"${start}","until":"${end}"}` : `date_preset=last_30d`)
+      : fbTimeParam
 
     // ── Supabase: vendas do período atual ──
     const salesQuery = supabase
@@ -197,20 +216,19 @@ export default function Dashboard() {
     // ── Facebook: insights de campanha ──
     const fbCampaignPromise = (token && accId) ? fetch(
       `https://graph.facebook.com/v19.0/act_${accId}/insights` +
-      `?fields=${INSIGHT_FIELDS}&date_preset=${preset}&access_token=${token}`
+      `?fields=${INSIGHT_FIELDS}&${fbTimeParam}&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
     // ── Facebook: insights diários (para gráfico) ──
-    const dailyPreset = p === 'maximum' ? 'last_30d' : preset
     const fbDailyPromise = (token && accId) ? fetch(
       `https://graph.facebook.com/v19.0/act_${accId}/insights` +
-      `?fields=spend,date_start&time_increment=1&date_preset=${dailyPreset}&limit=60&access_token=${token}`
+      `?fields=spend,date_start&time_increment=1&${fbDailyParam}&limit=60&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
     // ── Facebook: top campanhas ──
     const fbCampaignsPromise = (token && accId) ? fetch(
       `https://graph.facebook.com/v19.0/act_${accId}/campaigns` +
-      `?fields=id,name,status,insights.date_preset(${preset}){${INSIGHT_FIELDS}}&limit=20&access_token=${token}`
+      `?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
     const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns] = await Promise.all([
@@ -264,11 +282,12 @@ export default function Dashboard() {
       })
     }
 
-    // exclui hoje do gráfico: Facebook fecha o gasto do dia atual com ~1 dia de delay
     const now = new Date()
     const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+    // Exclui hoje só em períodos multi-dia (Facebook tem ~1 dia de delay no gasto).
+    const noExclude = p === 'today' || p === 'yesterday' || p === 'custom'
     const allDates = [...new Set([...Object.keys(revenueByDate), ...Object.keys(spendByDate)])]
-      .filter(d => d < todayStr)
+      .filter(d => noExclude || d < todayStr)
       .sort()
 
     const chartPoints: ChartPoint[] = allDates.slice(-30).map(d => ({
@@ -326,11 +345,19 @@ export default function Dashboard() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchAll(period) }, [period, fetchAll])
+  useEffect(() => {
+    if (period !== 'custom') fetchAll(period)
+  }, [period, fetchAll])
+
+  function applyCustom() {
+    if (customStart && customEnd && customStart <= customEnd) {
+      fetchAll('custom', customStart, customEnd)
+    }
+  }
 
   // ── Variation helpers ──
   const variation = (cur: number, prev: number): number | null => {
-    if (period === 'maximum') return null
+    if (period === 'maximum' || period === 'custom') return null
     if (prev === 0 && cur === 0) return null
     if (prev === 0) return cur > 0 ? 100 : -100
     return ((cur - prev) / prev) * 100
@@ -352,15 +379,45 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-[#E0EEE0]">Visão Geral</h1>
-        <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">Hoje</SelectItem>
-            <SelectItem value="7d">Últimos 7 dias</SelectItem>
-            <SelectItem value="30d">Últimos 30 dias</SelectItem>
-            <SelectItem value="maximum">Máximo</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="yesterday">Ontem</SelectItem>
+              <SelectItem value="7d">Últimos 7 dias</SelectItem>
+              <SelectItem value="30d">Últimos 30 dias</SelectItem>
+              <SelectItem value="maximum">Máximo</SelectItem>
+              <SelectItem value="custom">Personalizado</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {period === 'custom' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <span className="text-[#7AA880] text-sm">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                min={customStart}
+                onChange={e => setCustomEnd(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <button
+                onClick={applyCustom}
+                disabled={!customStart || !customEnd || customStart > customEnd}
+                className="h-9 px-4 rounded-md bg-[#4DB848] text-white text-sm font-medium hover:bg-[#3da038] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Aplicar
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* KPI cards */}
