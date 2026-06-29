@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, ResponsiveContainer,
+  BarChart, Bar,
 } from 'recharts'
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,6 +31,9 @@ interface KPIs {
 interface ChartPoint { date: string; revenue: number; spend: number }
 interface SourcePoint { name: string; value: number; color: string }
 interface TopCampaign { id: string; name: string; status: string; spend: number; revenue: number; roas: number; cpa: number; purchases: number }
+interface HourPoint { hour: string; count: number }
+interface ProductPoint { name: string; count: number; pct: number }
+interface WeekdayPoint { day: string; count: number }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -172,6 +176,26 @@ const PieTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ n
   )
 }
 
+const BarTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[#0D2114] border border-[#1B3D20] rounded-lg p-3 text-sm shadow-xl">
+      <p className="text-[#7AA880] mb-1">{label}</p>
+      <p className="text-[#E0EEE0] font-semibold">{payload[0].value} {payload[0].value === 1 ? 'venda' : 'vendas'}</p>
+    </div>
+  )
+}
+
+const DonutTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color: string } }> }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[#0D2114] border border-[#1B3D20] rounded-lg p-3 text-sm shadow-xl">
+      <p className="text-[#E0EEE0] font-semibold">{payload[0].name}</p>
+      <p className="text-[#7AA880]">{payload[0].value} {payload[0].value === 1 ? 'venda' : 'vendas'}</p>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -182,6 +206,10 @@ export default function Dashboard() {
   const [chartData, setChartData]       = useState<ChartPoint[]>([])
   const [sourceData, setSourceData]     = useState<SourcePoint[]>([])
   const [topCampaigns, setTopCampaigns] = useState<TopCampaign[]>([])
+  const [hourData, setHourData]         = useState<HourPoint[]>([])
+  const [productData, setProductData]   = useState<ProductPoint[]>([])
+  const [paymentData, setPaymentData]   = useState<SourcePoint[]>([])
+  const [weekdayData, setWeekdayData]   = useState<WeekdayPoint[]>([])
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
@@ -203,7 +231,7 @@ export default function Dashboard() {
     // ── Supabase: vendas do período atual ──
     const salesQuery = supabase
       .from('vendas')
-      .select('valor_venda, data, utm_source')
+      .select('valor_venda, data, utm_source, horario, produto_comprado, metodo_de_pagamento')
       .gte('data', start)
       .lte('data', end)
 
@@ -237,7 +265,7 @@ export default function Dashboard() {
     ])
 
     // ── Calcular KPIs atuais ──
-    const sales    = (salesRes.data ?? []) as Array<{ valor_venda: number; data: string; utm_source: string }>
+    const sales    = (salesRes.data ?? []) as Array<{ valor_venda: number; data: string; utm_source: string; horario: string; produto_comprado: string; metodo_de_pagamento: string }>
     const prevSalesArr = (prevSalesRes.data ?? []) as Array<{ valor_venda: number }>
 
     const grossRevenue = sales.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
@@ -323,6 +351,36 @@ export default function Dashboard() {
         name, value: Math.round((count / total) * 100), color: srcColors[name] ?? '#6C757D',
       }))
     setSourceData(srcPoints)
+
+    // ── Vendas por Horário ──
+    const hourCounts: Record<string, number> = {}
+    for (let h = 0; h < 24; h++) hourCounts[String(h).padStart(2, '0')] = 0
+    sales.forEach(s => {
+      if (s.horario) { const hr = s.horario.slice(0, 2); hourCounts[hr] = (hourCounts[hr] ?? 0) + 1 }
+    })
+    setHourData(Object.entries(hourCounts).map(([hour, count]) => ({ hour, count })))
+
+    // ── Vendas por Produto ──
+    const prodCounts: Record<string, number> = {}
+    sales.forEach(s => { if (s.produto_comprado) prodCounts[s.produto_comprado] = (prodCounts[s.produto_comprado] ?? 0) + 1 })
+    const tot = sales.length || 1
+    setProductData(Object.entries(prodCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count, pct: (count / tot) * 100 })))
+
+    // ── Vendas por Pagamento ──
+    const payCounts: Record<string, number> = {}
+    sales.forEach(s => {
+      const m = (s.metodo_de_pagamento ?? '').toLowerCase()
+      const key = m.includes('pix') ? 'PIX' : m.includes('cart') || m.includes('cred') ? 'Cartão' : m.includes('boleto') ? 'Boleto' : 'Outros'
+      payCounts[key] = (payCounts[key] ?? 0) + 1
+    })
+    const PAY_COLORS: Record<string, string> = { PIX: '#4DB848', Cartão: '#C8900A', Boleto: '#D45820', Outros: '#7AA880' }
+    setPaymentData(Object.entries(payCounts).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value, color: PAY_COLORS[name] ?? '#7AA880' })))
+
+    // ── Vendas por Dia da Semana ──
+    const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+    const dayCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }
+    sales.forEach(s => { if (s.data) { const d = new Date(s.data + 'T12:00:00'); dayCounts[d.getDay()] = (dayCounts[d.getDay()] ?? 0) + 1 } })
+    setWeekdayData([1, 2, 3, 4, 5, 6, 0].map(i => ({ day: DAYS[i], count: dayCounts[i] })))
 
     // ── Top campanhas ──
     if (fbCampaigns?.data) {
@@ -489,6 +547,114 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Vendas por Horário */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Vendas por Horário</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? <Skeleton className="h-52 w-full" /> : hourData.length === 0 ? (
+            <div className="h-52 flex items-center justify-center text-[#4A6E52] text-sm">Sem dados</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={hourData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1B3D20" vertical={false} />
+                <XAxis dataKey="hour" tick={{ fill: '#7AA880', fontSize: 10 }} axisLine={false} tickLine={false} interval={1} />
+                <YAxis tick={{ fill: '#7AA880', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<BarTooltip />} />
+                <Bar dataKey="count" name="Vendas" fill="#4DB848" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Vendas por Produto · Pagamento · Dia da Semana */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Vendas por Produto */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Vendas por Produto</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loading ? (
+              [...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)
+            ) : productData.length === 0 ? (
+              <div className="py-10 text-center text-[#4A6E52] text-sm">Sem dados</div>
+            ) : (
+              productData.slice(0, 6).map((p, i) => {
+                const colors = ['#4DB848', '#C8900A', '#D45820', '#7AA880', '#74B9FF', '#E4405F']
+                return (
+                  <div key={p.name}>
+                    <div className="flex justify-between text-xs mb-1.5">
+                      <span className="text-[#E0EEE0] truncate max-w-[180px]" title={p.name}>{p.name}</span>
+                      <span className="text-[#7AA880] ml-2 flex-shrink-0">{p.pct.toFixed(1)}% · {p.count}</span>
+                    </div>
+                    <div className="h-1.5 bg-[#1B3D20] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${p.pct}%`, backgroundColor: colors[i] ?? '#7AA880' }} />
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Vendas por Pagamento */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Vendas por Pagamento</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-52 w-full" /> : paymentData.length === 0 ? (
+              <div className="h-52 flex items-center justify-center text-[#4A6E52] text-sm">Sem dados</div>
+            ) : (
+              <div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie data={paymentData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={3} dataKey="value">
+                      {paymentData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    </Pie>
+                    <Tooltip content={<DonutTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 mt-1">
+                  {paymentData.map(p => (
+                    <div key={p.name} className="flex items-center gap-1.5 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: p.color }} />
+                      <span className="text-[#7AA880]">{p.name}</span>
+                      <span className="text-[#E0EEE0] font-medium">{p.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Vendas por Dia da Semana */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Vendas por Dia da Semana</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-52 w-full" /> : weekdayData.length === 0 ? (
+              <div className="h-52 flex items-center justify-center text-[#4A6E52] text-sm">Sem dados</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={210}>
+                <BarChart data={weekdayData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1B3D20" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: '#7AA880', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#7AA880', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<BarTooltip />} />
+                  <Bar dataKey="count" name="Vendas" fill="#C8900A" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             )}
           </CardContent>
         </Card>
