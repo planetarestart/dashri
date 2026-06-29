@@ -358,7 +358,10 @@ export default function Dashboard() {
     sales.forEach(s => {
       if (s.horario) { const hr = s.horario.slice(0, 2); hourCounts[hr] = (hourCounts[hr] ?? 0) + 1 }
     })
-    setHourData(Object.entries(hourCounts).map(([hour, count]) => ({ hour, count })))
+    // Monta em ordem 00→23 explicitamente (Object.entries ordena "10"-"23" antes de "00"-"09")
+    const hourPoints: HourPoint[] = []
+    for (let h = 0; h < 24; h++) { const k = String(h).padStart(2,'0'); hourPoints.push({ hour: k, count: hourCounts[k] ?? 0 }) }
+    setHourData(hourPoints)
 
     // ── Vendas por Produto ──
     const prodCounts: Record<string, number> = {}
