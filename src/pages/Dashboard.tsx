@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, ResponsiveContainer,
-  BarChart, Bar,
+  BarChart, Bar, ComposedChart,
 } from 'recharts'
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,6 +34,8 @@ interface TopCampaign { id: string; name: string; status: string; spend: number;
 interface HourPoint { hour: string; count: number }
 interface ProductPoint { name: string; count: number; pct: number }
 interface WeekdayPoint { day: string; count: number }
+interface DailyMetricsPoint { date: string; sales: number; roas: number; cpa: number }
+interface FunnelData { lpv: number; ic: number; purchases: number }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,7 +87,7 @@ const FB_PRESET: Record<Exclude<Period, 'custom'>, string> = {
 const INSIGHT_FIELDS = 'spend,actions,action_values,purchase_roas,cost_per_action_type'
 
 function extractFbMetrics(data: Record<string, unknown>[] | undefined) {
-  if (!data || data.length === 0) return { spend: 0, purchases: 0, revenue: 0, roas: 0, cpa: 0 }
+  if (!data || data.length === 0) return { spend: 0, purchases: 0, revenue: 0, roas: 0, cpa: 0, initiateCheckout: 0, landingPageViews: 0 }
   const d = data[0] as Record<string, unknown>
   const getAction = (key: string) => {
     const arr = (d.actions ?? []) as Array<{ action_type: string; value: string }>
@@ -103,10 +105,12 @@ function extractFbMetrics(data: Record<string, unknown>[] | undefined) {
     const arr = (d.purchase_roas ?? []) as Array<{ action_type: string; value: string }>
     return parseFloat(arr[0]?.value ?? '0') || 0
   }
-  const purchases = getAction('offsite_conversion.fb_pixel_purchase') || getAction('purchase') || getAction('omni_purchase')
-  const revenue   = getActionValue('offsite_conversion.fb_pixel_purchase') || getActionValue('purchase') || getActionValue('omni_purchase')
-  const cpa       = getCPA('offsite_conversion.fb_pixel_purchase') || getCPA('purchase') || getCPA('omni_purchase')
-  return { spend: parseFloat(d.spend as string) || 0, purchases, revenue, roas: getRoas(), cpa }
+  const purchases        = getAction('offsite_conversion.fb_pixel_purchase') || getAction('purchase') || getAction('omni_purchase')
+  const revenue          = getActionValue('offsite_conversion.fb_pixel_purchase') || getActionValue('purchase') || getActionValue('omni_purchase')
+  const cpa              = getCPA('offsite_conversion.fb_pixel_purchase') || getCPA('purchase') || getCPA('omni_purchase')
+  const initiateCheckout = getAction('offsite_conversion.fb_pixel_initiate_checkout') || getAction('initiate_checkout') || getAction('omni_initiated_checkout')
+  const landingPageViews = getAction('landing_page_view') || getAction('omni_landing_page_view')
+  return { spend: parseFloat(d.spend as string) || 0, purchases, revenue, roas: getRoas(), cpa, initiateCheckout, landingPageViews }
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -186,6 +190,26 @@ const BarTooltip = ({ active, payload, label }: { active?: boolean; payload?: Ar
   )
 }
 
+const ComboTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[#0D2114] border border-[#1B3D20] rounded-lg p-3 text-sm shadow-xl">
+      <p className="text-[#7AA880] mb-2">{label}</p>
+      {payload.map(e => (
+        <div key={e.name} className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: e.color }} />
+          <span className="text-[#7AA880]">{e.name}:</span>
+          <span className="text-[#E0EEE0] font-semibold">
+            {e.name === 'ROAS' ? `${e.value.toFixed(2)}x`
+              : e.name === 'CPA' ? formatCurrency(e.value)
+              : formatNumber(e.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const DonutTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color: string } }> }) => {
   if (!active || !payload?.length) return null
   return (
@@ -210,6 +234,8 @@ export default function Dashboard() {
   const [productData, setProductData]   = useState<ProductPoint[]>([])
   const [paymentData, setPaymentData]   = useState<SourcePoint[]>([])
   const [weekdayData, setWeekdayData]   = useState<WeekdayPoint[]>([])
+  const [dailyMetrics, setDailyMetrics] = useState<DailyMetricsPoint[]>([])
+  const [funnelData, setFunnelData]     = useState<FunnelData | null>(null)
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
@@ -248,10 +274,10 @@ export default function Dashboard() {
       `?fields=${INSIGHT_FIELDS}&${fbTimeParam}&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
-    // ── Facebook: insights diários (para gráfico) ──
+    // ── Facebook: insights diários (para gráficos) ──
     const fbDailyPromise = (token && accId) ? fetch(
       `https://graph.facebook.com/v19.0/act_${accId}/insights` +
-      `?fields=spend,date_start&time_increment=1&${fbDailyParam}&limit=60&access_token=${token}`
+      `?fields=spend,date_start,actions,purchase_roas,cost_per_action_type&time_increment=1&${fbDailyParam}&limit=60&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
     // ── Facebook: top campanhas ──
@@ -327,6 +353,34 @@ export default function Dashboard() {
       spend: spendByDate[d] ?? 0,
     }))
     setChartData(chartPoints)
+
+    // ── CPA × ROAS × Vendas (diário) ──
+    if (fbDaily?.data) {
+      const countByDate: Record<string, number> = {}
+      sales.forEach(s => { if (s.data) countByDate[s.data] = (countByDate[s.data] ?? 0) + 1 })
+
+      const dailyRows = (fbDaily.data as Array<Record<string, unknown>>)
+        .filter(row => noExclude || (row.date_start as string) < todayStr)
+        .map(row => {
+          const dateStr = row.date_start as string
+          const getAct = (key: string) => {
+            const arr = (row.actions ?? []) as Array<{ action_type: string; value: string }>
+            return parseFloat(arr.find(a => a.action_type === key)?.value ?? '0') || 0
+          }
+          const roas = (() => {
+            const arr = (row.purchase_roas ?? []) as Array<{ value: string }>
+            return parseFloat(arr[0]?.value ?? '0') || 0
+          })()
+          const purch = getAct('offsite_conversion.fb_pixel_purchase') || getAct('purchase') || getAct('omni_purchase')
+          const spend = (parseFloat(row.spend as string) || 0) * 1.1215
+          const cpa   = purch > 0 ? spend / purch : 0
+          return { date: dateStr.slice(5), sales: countByDate[dateStr] ?? 0, roas, cpa }
+        })
+      setDailyMetrics(dailyRows)
+    }
+
+    // ── Funil de Conversão ──
+    setFunnelData({ lpv: fbMetrics.landingPageViews, ic: fbMetrics.initiateCheckout, purchases: fbMetrics.purchases })
 
     // ── Pizza: utm_source ──
     const srcCount: Record<string, number> = {}
@@ -491,6 +545,93 @@ export default function Dashboard() {
           ? [...Array(9)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
         }
+      </div>
+
+      {/* CPA × ROAS × Vendas + Funil de Conversão */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* CPA × ROAS × Vendas */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">CPA × ROAS × Vendas</CardTitle>
+              <span className="text-[10px] text-[#4A6E52]">barras = vendas · linhas = métricas FB</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-64 w-full" /> : dailyMetrics.length === 0 ? (
+              <div className="h-64 flex items-center justify-center text-[#4A6E52] text-sm">
+                {getSetting('facebook_token') ? 'Sem dados para o período.' : 'Conecte o Facebook Ads em Integrações.'}
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={dailyMetrics} margin={{ top: 5, right: 50, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1B3D20" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fill: '#7AA880', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="metrics" orientation="left" tick={{ fill: '#7AA880', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v.toFixed(1)}x`} />
+                  <YAxis yAxisId="sales" orientation="right" tick={{ fill: '#7AA880', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
+                  <Tooltip content={<ComboTooltip />} />
+                  <Legend formatter={v => <span style={{ color: '#7AA880', fontSize: '12px' }}>{v}</span>} />
+                  <Bar yAxisId="sales" dataKey="sales" name="Vendas" fill="#6C5CE7" fillOpacity={0.65} radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="metrics" type="monotone" dataKey="roas" name="ROAS" stroke="#74B9FF" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                  <Line yAxisId="metrics" type="monotone" dataKey="cpa" name="CPA" stroke="#FF6B6B" strokeWidth={2} dot={false} activeDot={{ r: 4 }} hide={dailyMetrics.every(d => d.cpa === 0)} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Funil de Conversão */}
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Funil de Conversão</CardTitle>
+              <span className="text-[10px] text-[#4A6E52]">clique → aprovado</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-64 w-full" /> : !funnelData || (funnelData.lpv === 0 && funnelData.ic === 0 && funnelData.purchases === 0) ? (
+              <div className="h-64 flex items-center justify-center text-[#4A6E52] text-sm">
+                {getSetting('facebook_token') ? 'Sem dados de funil.' : 'Conecte o Facebook Ads.'}
+              </div>
+            ) : (() => {
+              const { lpv, ic, purchases } = funnelData
+              const pct = (n: number, d: number) => d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—'
+              const steps = [
+                { label: 'Page View',         value: lpv,       pct: '100%',            bar: 100 },
+                { label: 'Initiate Checkout',  value: ic,        pct: pct(ic, lpv),      bar: lpv > 0 ? (ic/lpv)*100 : 0 },
+                { label: 'Purchase',           value: purchases, pct: pct(purchases, lpv), bar: lpv > 0 ? (purchases/lpv)*100 : 0 },
+              ]
+              const rates = [
+                { label: 'Page View / Initiate Checkout',  value: pct(ic, lpv) },
+                { label: 'Initiate Checkout / Purchase',    value: pct(purchases, ic) },
+                { label: 'Page View / Purchase',            value: pct(purchases, lpv) },
+              ]
+              return (
+                <div className="space-y-4">
+                  {steps.map(s => (
+                    <div key={s.label}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-[#E0EEE0]">{s.label}</span>
+                        <span className="text-[#7AA880]">{formatNumber(s.value)} · <span className="text-[#C8900A] font-semibold">{s.pct}</span></span>
+                      </div>
+                      <div className="h-1.5 bg-[#1B3D20] rounded-full overflow-hidden">
+                        <div className="h-full bg-[#4DB848] rounded-full transition-all" style={{ width: `${Math.min(s.bar, 100)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="border-t border-[#1B3D20] pt-3 space-y-2">
+                    {rates.map(r => (
+                      <div key={r.label} className="flex items-center justify-between text-xs">
+                        <span className="text-[#7AA880]">{r.label}</span>
+                        <span className="text-[#C8900A] font-semibold">{r.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Charts */}
