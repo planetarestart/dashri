@@ -35,7 +35,7 @@ interface HourPoint { hour: string; count: number }
 interface ProductPoint { name: string; count: number; pct: number }
 interface WeekdayPoint { day: string; count: number }
 interface DailyMetricsPoint { date: string; sales: number; roas: number; cpa: number }
-interface FunnelData { lpv: number; ic: number; purchases: number }
+interface FunnelData { linkClicks: number; lpv: number; ic: number; purchases: number }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ const FB_PRESET: Record<Exclude<Period, 'custom'>, string> = {
 const INSIGHT_FIELDS = 'spend,actions,action_values,purchase_roas,cost_per_action_type'
 
 function extractFbMetrics(data: Record<string, unknown>[] | undefined) {
-  if (!data || data.length === 0) return { spend: 0, purchases: 0, revenue: 0, roas: 0, cpa: 0, initiateCheckout: 0, landingPageViews: 0 }
+  if (!data || data.length === 0) return { spend: 0, purchases: 0, revenue: 0, roas: 0, cpa: 0, initiateCheckout: 0, landingPageViews: 0, linkClicks: 0 }
   const d = data[0] as Record<string, unknown>
   const getAction = (key: string) => {
     const arr = (d.actions ?? []) as Array<{ action_type: string; value: string }>
@@ -110,7 +110,8 @@ function extractFbMetrics(data: Record<string, unknown>[] | undefined) {
   const cpa              = getCPA('offsite_conversion.fb_pixel_purchase') || getCPA('purchase') || getCPA('omni_purchase')
   const initiateCheckout = getAction('offsite_conversion.fb_pixel_initiate_checkout') || getAction('initiate_checkout') || getAction('omni_initiated_checkout')
   const landingPageViews = getAction('landing_page_view') || getAction('omni_landing_page_view')
-  return { spend: parseFloat(d.spend as string) || 0, purchases, revenue, roas: getRoas(), cpa, initiateCheckout, landingPageViews }
+  const linkClicks       = getAction('link_click')
+  return { spend: parseFloat(d.spend as string) || 0, purchases, revenue, roas: getRoas(), cpa, initiateCheckout, landingPageViews, linkClicks }
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -380,7 +381,7 @@ export default function Dashboard() {
     }
 
     // ── Funil de Conversão ──
-    setFunnelData({ lpv: fbMetrics.landingPageViews, ic: fbMetrics.initiateCheckout, purchases: fbMetrics.purchases })
+    setFunnelData({ linkClicks: fbMetrics.linkClicks, lpv: fbMetrics.landingPageViews, ic: fbMetrics.initiateCheckout, purchases: fbMetrics.purchases })
 
     // ── Pizza: utm_source ──
     const srcCount: Record<string, number> = {}
@@ -594,17 +595,18 @@ export default function Dashboard() {
                 {getSetting('facebook_token') ? 'Sem dados de funil.' : 'Conecte o Facebook Ads.'}
               </div>
             ) : (() => {
-              const { lpv, ic, purchases } = funnelData
+              const { linkClicks, lpv, ic, purchases } = funnelData
               const pct = (n: number, d: number) => d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—'
               const steps = [
-                { label: 'Page View',         value: lpv,       pct: '100%',            bar: 100 },
-                { label: 'Initiate Checkout',  value: ic,        pct: pct(ic, lpv),      bar: lpv > 0 ? (ic/lpv)*100 : 0 },
-                { label: 'Purchase',           value: purchases, pct: pct(purchases, lpv), bar: lpv > 0 ? (purchases/lpv)*100 : 0 },
+                { label: 'Page View',          value: linkClicks, pct: '100%',                       bar: 100 },
+                { label: 'View Content',        value: lpv,        pct: pct(lpv, linkClicks),         bar: linkClicks > 0 ? (lpv/linkClicks)*100 : 0 },
+                { label: 'Initiate Checkout',   value: ic,         pct: pct(ic, linkClicks),          bar: linkClicks > 0 ? (ic/linkClicks)*100 : 0 },
+                { label: 'Purchase',            value: purchases,  pct: pct(purchases, linkClicks),   bar: linkClicks > 0 ? (purchases/linkClicks)*100 : 0 },
               ]
               const rates = [
-                { label: 'Page View / Initiate Checkout',  value: pct(ic, lpv) },
+                { label: 'Page View / Initiate Checkout',  value: pct(ic, linkClicks) },
                 { label: 'Initiate Checkout / Purchase',    value: pct(purchases, ic) },
-                { label: 'Page View / Purchase',            value: pct(purchases, lpv) },
+                { label: 'Page View / Purchase',            value: pct(purchases, linkClicks) },
               ]
               return (
                 <div className="space-y-4">
