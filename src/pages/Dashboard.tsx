@@ -26,6 +26,10 @@ interface KPIs {
   cpa: number
   roi: number
   fbPurchases: number
+  profitProdutor: number
+  profitCoprodutor: number
+  spendProdutor: number
+  spendCoprodutor: number
 }
 
 interface ChartPoint { date: string; revenue: number; spend: number }
@@ -317,10 +321,15 @@ export default function Dashboard() {
       cpa: acquisitions > 0 ? adSpend / acquisitions : 0,
       roi: adSpend > 0 ? ((grossRevenue - adSpend) / adSpend) * 100 : 0,
       fbPurchases: fbMetrics.purchases,
+      profitProdutor:   profit * 0.60,
+      profitCoprodutor: profit * 0.40,
+      spendProdutor:    adSpend * 0.40,
+      spendCoprodutor:  adSpend * 0.60,
     }
     const prevKpisCalc: KPIs = {
       grossRevenue: prevRevenue,
       adSpend: 0, metaTax: 0, profit: prevProfit, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
+      profitProdutor: prevProfit * 0.60, profitCoprodutor: prevProfit * 0.40, spendProdutor: 0, spendCoprodutor: 0,
     }
 
     setKpis(currentKpis)
@@ -546,6 +555,23 @@ export default function Dashboard() {
           ? [...Array(9)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
         }
+      </div>
+
+      {/* KPIs Produtor / Coprodutor */}
+      <div className="space-y-2">
+        <p className="text-[11px] text-[#4A6E52] font-semibold uppercase tracking-wider">Produtor / Coprodutor</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {loading
+            ? [...Array(4)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
+            : kpis ? [
+                { label: 'Lucro × 60% Produtor',     value: formatCurrency(kpis.profitProdutor),   variation: variation(kpis.profitProdutor,   prevKpis?.profitProdutor   ?? 0) },
+                { label: 'Lucro × 40% Coprodutor',   value: formatCurrency(kpis.profitCoprodutor), variation: variation(kpis.profitCoprodutor, prevKpis?.profitCoprodutor ?? 0) },
+                { label: 'Gastos × 40% Produtor',    value: formatCurrency(kpis.spendProdutor),    variation: null },
+                { label: 'Gastos × 60% Coprodutor',  value: formatCurrency(kpis.spendCoprodutor),  variation: null },
+              ].map((m) => <MetricCard key={m.label} {...m} />)
+            : []
+          }
+        </div>
       </div>
 
       {/* CPA × ROAS × Vendas + Funil de Conversão */}
