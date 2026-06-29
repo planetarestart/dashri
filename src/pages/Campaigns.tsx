@@ -179,11 +179,13 @@ function AdRow({ ad }: { ad: FbAd }) {
 }
 
 function AdSetRow({
-  adSet, token, datePreset,
+  adSet, token, datePreset, customStart, customEnd,
 }: {
   adSet: FbAdSet
   token: string
   datePreset: string
+  customStart?: string
+  customEnd?: string
 }) {
   const [open, setOpen] = useState(false)
   const [ads, setAds] = useState<FbAd[]>(adSet.ads ?? [])
@@ -197,7 +199,11 @@ function AdSetRow({
     setLoading(true)
     try {
       const data = await fbFetch(
-        `https://graph.facebook.com/v19.0/${adSet.id}/ads?fields=id,name,status,insights.date_preset(${datePreset}){${INSIGHT_FIELDS}}&limit=100&access_token=${token}`
+        `https://graph.facebook.com/v19.0/${adSet.id}/ads?fields=id,name,status,` +
+        (datePreset === 'custom' && customStart && customEnd
+          ? `insights.time_range({"since":"${customStart}","until":"${customEnd}"})`
+          : `insights.date_preset(${datePreset})`) +
+        `{${INSIGHT_FIELDS}}&limit=100&access_token=${token}`
       )
       const rows = (data.data as Record<string, unknown>[]) ?? []
       setAds(rows.map(r => ({
@@ -241,11 +247,13 @@ function AdSetRow({
 }
 
 function CampaignRow({
-  campaign, token, datePreset,
+  campaign, token, datePreset, customStart, customEnd,
 }: {
   campaign: FbCampaign
   token: string
   datePreset: string
+  customStart?: string
+  customEnd?: string
 }) {
   const [open, setOpen]     = useState(false)
   const [adSets, setAdSets] = useState<FbAdSet[]>(campaign.adSets ?? [])
@@ -264,7 +272,11 @@ function CampaignRow({
     setLoading(true)
     try {
       const data = await fbFetch(
-        `https://graph.facebook.com/v19.0/${campaign.id}/adsets?fields=id,name,status,insights.date_preset(${datePreset}){${INSIGHT_FIELDS}}&limit=100&access_token=${token}`
+        `https://graph.facebook.com/v19.0/${campaign.id}/adsets?fields=id,name,status,` +
+          (datePreset === 'custom' && customStart && customEnd
+            ? `insights.time_range({"since":"${customStart}","until":"${customEnd}"})`
+            : `insights.date_preset(${datePreset})`) +
+          `{${INSIGHT_FIELDS}}&limit=100&access_token=${token}`
       )
       const rows = (data.data as Record<string, unknown>[]) ?? []
       setAdSets(rows.map(r => ({
@@ -386,7 +398,7 @@ function CampaignRow({
         </tr>
       )}
       {open && !loading && adSets.map(as => (
-        <AdSetRow key={as.id} adSet={as} token={token} datePreset={datePreset} />
+        <AdSetRow key={as.id} adSet={as} token={token} datePreset={datePreset} customStart={customStart} customEnd={customEnd} />
       ))}
     </>
   )
@@ -609,14 +621,19 @@ export default function Campaigns() {
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [datePreset, setDatePreset]     = useState('maximum')
+  const [customStart, setCustomStart]   = useState('')
+  const [customEnd, setCustomEnd]       = useState('')
 
-  const fetchCampaigns = useCallback(async (tok: string, accId: string, preset: string) => {
+  const fetchCampaigns = useCallback(async (tok: string, accId: string, preset: string, cs?: string, ce?: string) => {
     setLoading(true)
     setError(null)
+    const insightsParam = preset === 'custom' && cs && ce
+      ? `insights.time_range({"since":"${cs}","until":"${ce}"})`
+      : `insights.date_preset(${preset})`
     try {
       const data = await fbFetch(
         `https://graph.facebook.com/v19.0/act_${accId}/campaigns` +
-        `?fields=id,name,status,daily_budget,insights.date_preset(${preset}){${INSIGHT_FIELDS}}` +
+        `?fields=id,name,status,daily_budget,${insightsParam}{${INSIGHT_FIELDS}}` +
         `&limit=100&access_token=${tok}`
       )
       const rows = (data.data as Record<string, unknown>[]) ?? []
@@ -644,9 +661,15 @@ export default function Campaigns() {
   }, [])
 
   useEffect(() => {
-    if (token && accountId) fetchCampaigns(token, accountId, datePreset)
+    if (token && accountId && datePreset !== 'custom') fetchCampaigns(token, accountId, datePreset)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datePreset])
+
+  function applyCustom() {
+    if (token && accountId && customStart && customEnd && customStart <= customEnd) {
+      fetchCampaigns(token, accountId, 'custom', customStart, customEnd)
+    }
+  }
 
   const filtered = campaigns.filter(c => {
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
@@ -706,8 +729,35 @@ export default function Campaigns() {
               <SelectItem value="this_month">Este mês</SelectItem>
               <SelectItem value="last_month">Mês passado</SelectItem>
               <SelectItem value="maximum">Máximo</SelectItem>
+              <SelectItem value="custom">Personalizado</SelectItem>
             </SelectContent>
           </Select>
+
+          {datePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <span className="text-[#7AA880] text-sm">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                min={customStart}
+                onChange={e => setCustomEnd(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <button
+                onClick={applyCustom}
+                disabled={!customStart || !customEnd || customStart > customEnd}
+                className="h-9 px-4 rounded-md bg-[#4DB848] text-white text-sm font-medium hover:bg-[#3da038] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Aplicar
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -745,7 +795,7 @@ export default function Campaigns() {
                     </tr>
                   ) : (
                     filtered.map(c => (
-                      <CampaignRow key={c.id} campaign={c} token={token} datePreset={datePreset} />
+                      <CampaignRow key={c.id} campaign={c} token={token} datePreset={datePreset} customStart={customStart} customEnd={customEnd} />
                     ))
                   )}
                 </tbody>

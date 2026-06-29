@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 
 const ITEMS_PER_PAGE = 15
 
-type DatePreset = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'this_month' | 'last_month' | 'maximum'
+type DatePreset = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'this_month' | 'last_month' | 'maximum' | 'custom'
 
 interface VendaRow {
   id: number
@@ -31,7 +31,7 @@ interface VendaRow {
   metodo_de_pagamento: string
 }
 
-function getDateRange(preset: DatePreset): { start: string | null; end: string | null } {
+function getDateRange(preset: DatePreset, cs?: string, ce?: string): { start: string | null; end: string | null } {
   const fmt = (d: Date) => {
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -55,6 +55,7 @@ function getDateRange(preset: DatePreset): { start: string | null; end: string |
     const e = new Date(today.getFullYear(), today.getMonth(), 0)
     return { start: fmt(s), end: fmt(e) }
   }
+  if (preset === 'custom') return { start: cs ?? null, end: ce ?? null }
   return { start: null, end: null } // maximum
 }
 
@@ -94,16 +95,18 @@ export default function Sales() {
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
   const [datePreset, setDatePreset] = useState<DatePreset>('maximum')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd]     = useState('')
 
   const [search, setSearch]                 = useState('')
   const [paymentFilter, setPaymentFilter]   = useState('all')
   const [productFilter, setProductFilter]   = useState('all')
   const [page, setPage]                     = useState(1)
 
-  const fetchSales = useCallback(async (preset: DatePreset) => {
+  const fetchSales = useCallback(async (preset: DatePreset, cs?: string, ce?: string) => {
     setLoading(true)
     setError(null)
-    const { start, end } = getDateRange(preset)
+    const { start, end } = getDateRange(preset, cs, ce)
 
     let query = supabase
       .from('vendas')
@@ -120,7 +123,14 @@ export default function Sales() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchSales(datePreset) }, [datePreset, fetchSales])
+  useEffect(() => { if (datePreset !== 'custom') fetchSales(datePreset) }, [datePreset, fetchSales])
+
+  function applyCustom() {
+    if (customStart && customEnd && customStart <= customEnd) {
+      setPage(1)
+      fetchSales('custom', customStart, customEnd)
+    }
+  }
 
   const uniquePayments = [...new Set(allSales.map(s => s.metodo_de_pagamento).filter(Boolean))]
   const uniqueProducts  = [...new Set(allSales.map(s => s.produto_comprado).filter(Boolean))]
@@ -172,8 +182,35 @@ export default function Sales() {
               <SelectItem value="this_month">Este mês</SelectItem>
               <SelectItem value="last_month">Mês passado</SelectItem>
               <SelectItem value="maximum">Máximo</SelectItem>
+              <SelectItem value="custom">Personalizado</SelectItem>
             </SelectContent>
           </Select>
+
+          {datePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <span className="text-[#7AA880] text-sm">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                min={customStart}
+                onChange={e => setCustomEnd(e.target.value)}
+                className="h-9 px-3 rounded-md border border-[#1B3D20] bg-[#081208] text-[#E0EEE0] text-sm focus:outline-none focus:ring-1 focus:ring-[#4DB848]"
+              />
+              <button
+                onClick={applyCustom}
+                disabled={!customStart || !customEnd || customStart > customEnd}
+                className="h-9 px-4 rounded-md bg-[#4DB848] text-white text-sm font-medium hover:bg-[#3da038] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Aplicar
+              </button>
+            </>
+          )}
 
           <div className="relative">
             <Input
