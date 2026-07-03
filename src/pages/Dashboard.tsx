@@ -146,7 +146,7 @@ function FunnelFlowChart({ data }: { data: FunnelData | null }) {
     return `M ${x1} ${CY - h1/2} C ${mx} ${CY - h1/2}, ${mx} ${CY - h2/2}, ${x2} ${CY - h2/2} L ${x2} ${CY + h2/2} C ${mx} ${CY + h2/2}, ${mx} ${CY + h1/2}, ${x1} ${CY + h1/2} Z`
   })
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 140 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
       <defs>
         <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%"   stopColor="#4B6EF5" />
@@ -196,7 +196,7 @@ function MetricCard({ label, value, variation, loading }: MetricCardProps) {
     <Card className="hover:border-[#4DB848]/30 transition-colors">
       <CardContent className="p-4">
         <span className="text-[10px] text-[#7AA880] font-semibold uppercase tracking-wider block mb-2 leading-tight">{label}</span>
-        <p className="text-lg font-bold text-[#E0EEE0] mb-1 leading-tight truncate">{value}</p>
+        <p className="text-base font-bold text-[#E0EEE0] mb-1 leading-tight break-words">{value}</p>
         {variation !== null ? (
           <div className={`flex items-center gap-1 text-[10px] font-medium ${color}`}>
             <Arrow className="w-3 h-3 flex-shrink-0" />
@@ -604,7 +604,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 gap-3">
         {loading
           ? [...Array(9)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
           : metrics.map((m) => <MetricCard key={m.label} {...m} />)
@@ -614,7 +614,7 @@ export default function Dashboard() {
       {/* KPIs Produtor / Coprodutor */}
       <div className="space-y-2">
         <p className="text-[11px] text-[#4A6E52] font-semibold uppercase tracking-wider">Produtor / Coprodutor</p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {loading
             ? [...Array(4)].map((_, i) => <MetricCard key={i} label="" value="" variation={0} loading />)
             : kpis ? [
