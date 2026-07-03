@@ -26,6 +26,7 @@ interface KPIs {
   cpa: number
   roi: number
   fbPurchases: number
+  avgTicket: number
   profitProdutor: number
   profitCoprodutor: number
   spendProdutor: number
@@ -123,6 +124,56 @@ function extractFbMetrics(data: Record<string, unknown>[] | undefined) {
 interface MetricCardProps {
   label: string; value: string; variation: number | null
   loading?: boolean
+}
+
+function FunnelFlowChart({ data }: { data: FunnelData | null }) {
+  if (!data || data.linkClicks === 0) return (
+    <div className="h-36 flex items-center justify-center text-[#4A6E52] text-sm">Sem dados para o período.</div>
+  )
+  const stages = [
+    { label: 'Cliques no Link', value: data.linkClicks },
+    { label: 'Page View',       value: data.lpv },
+    { label: 'IC',              value: data.ic },
+    { label: 'Purchase',        value: data.purchases },
+  ]
+  const maxVal = stages[0].value || 1
+  const W = 600; const H = 130; const BAND_MAX = 80; const CY = H / 2 + 10
+  const segW = W / stages.length
+  const heights = stages.map(s => Math.max((s.value / maxVal) * BAND_MAX, 3))
+  const segments = stages.slice(0, -1).map((_, i) => {
+    const x1 = i * segW; const x2 = (i + 1) * segW; const mx = (x1 + x2) / 2
+    const h1 = heights[i]; const h2 = heights[i + 1]
+    return `M ${x1} ${CY - h1/2} C ${mx} ${CY - h1/2}, ${mx} ${CY - h2/2}, ${x2} ${CY - h2/2} L ${x2} ${CY + h2/2} C ${mx} ${CY + h2/2}, ${mx} ${CY + h1/2}, ${x1} ${CY + h1/2} Z`
+  })
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 140 }}>
+      <defs>
+        <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#4B6EF5" />
+          <stop offset="33%"  stopColor="#7B52E8" />
+          <stop offset="66%"  stopColor="#A83DD8" />
+          <stop offset="100%" stopColor="#D428A8" />
+        </linearGradient>
+      </defs>
+      {segments.map((d, i) => <path key={i} d={d} fill="url(#flowGrad)" opacity={0.85} />)}
+      {stages.slice(1).map((_, i) => (
+        <line key={i} x1={(i+1)*segW} y1={16} x2={(i+1)*segW} y2={H} stroke="#1B3D20" strokeWidth={1} strokeDasharray="3,3" />
+      ))}
+      {stages.map((s, i) => (
+        <text key={i} x={(i+0.5)*segW} y={12} textAnchor="middle" fill="#7AA880" fontSize={10}>{s.label}</text>
+      ))}
+      {stages.map((s, i) => (
+        <g key={i}>
+          <text x={(i+0.5)*segW} y={CY + 2} textAnchor="middle" fill="white" fontSize={13} fontWeight="bold">
+            {((s.value/maxVal)*100).toFixed(1)}%
+          </text>
+          <text x={(i+0.5)*segW} y={CY + 16} textAnchor="middle" fill="rgba(255,255,255,0.6)" fontSize={9}>
+            {s.value.toLocaleString('pt-BR')}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )
 }
 
 function MetricCard({ label, value, variation, loading }: MetricCardProps) {
@@ -321,6 +372,7 @@ export default function Dashboard() {
       cpa: acquisitions > 0 ? adSpend / acquisitions : 0,
       roi: adSpend > 0 ? ((grossRevenue - adSpend) / adSpend) * 100 : 0,
       fbPurchases: fbMetrics.purchases,
+      avgTicket: sales.length > 0 ? grossRevenue / sales.length : 0,
       profitProdutor:   profit * 0.60,
       profitCoprodutor: profit * 0.40,
       spendProdutor:    adSpend * 0.40,
@@ -329,6 +381,7 @@ export default function Dashboard() {
     const prevKpisCalc: KPIs = {
       grossRevenue: prevRevenue,
       adSpend: 0, metaTax: 0, profit: prevProfit, sales: prevSalesArr.length, roas: 0, cpa: 0, roi: 0, fbPurchases: 0,
+      avgTicket: prevSalesArr.length > 0 ? prevRevenue / prevSalesArr.length : 0,
       profitProdutor: prevProfit * 0.60, profitCoprodutor: prevProfit * 0.40, spendProdutor: 0, spendCoprodutor: 0,
     }
 
@@ -501,6 +554,7 @@ export default function Dashboard() {
     { label: 'Imposto Meta',      value: formatCurrency(kpis.metaTax),      variation: null },
     { label: 'Vendas',            value: formatNumber(kpis.sales),          variation: variation(kpis.sales, prevKpis?.sales ?? 0) },
     { label: 'Compras FB',        value: formatNumber(kpis.fbPurchases),    variation: null },
+    { label: 'Ticket Médio',      value: formatCurrency(kpis.avgTicket),    variation: variation(kpis.avgTicket, prevKpis?.avgTicket ?? 0) },
   ] : []
 
   return (
@@ -658,6 +712,19 @@ export default function Dashboard() {
                 </div>
               )
             })()}
+          </CardContent>
+        </Card>
+
+        {/* Funil de Fluxo */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Funil de Fluxo</CardTitle>
+              <span className="text-[10px] text-[#4A6E52]">Cliques → Purchase</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-36 w-full" /> : <FunnelFlowChart data={funnelData} />}
           </CardContent>
         </Card>
       </div>
