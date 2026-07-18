@@ -27,7 +27,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          'fixed top-0 left-0 z-30 h-full w-64 bg-[#0A1C0E] border-r border-[#1B3D20] flex flex-col transition-transform duration-300',
+          'fixed top-0 left-0 z-30 h-full w-64 bg-[#0D2114] border-r border-[#1B3D20] flex flex-col transition-transform duration-300',
           'lg:translate-x-0 lg:static lg:z-auto',
           open ? 'translate-x-0' : '-translate-x-full'
         )}
@@ -75,7 +75,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         {/* Footer */}
         <div className="p-4 border-t border-[#1B3D20]">
-          <div className="bg-[#081208] rounded-lg p-3 text-xs text-[#7AA880]">
+          <div className="bg-[#061409] rounded-lg p-3 text-xs text-[#7AA880]">
             <p className="font-semibold text-[#4DB848] mb-0.5">Restart Intestinal</p>
             <p>Painel de Rastreamento</p>
           </div>

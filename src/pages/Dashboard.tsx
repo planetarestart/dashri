@@ -293,8 +293,10 @@ export default function Dashboard() {
   const [weekdayData, setWeekdayData]   = useState<WeekdayPoint[]>([])
   const [dailyMetrics, setDailyMetrics] = useState<DailyMetricsPoint[]>([])
   const [funnelData, setFunnelData]     = useState<FunnelData | null>(null)
-  const [estadoData, setEstadoData]     = useState<LocationPoint[]>([])
-  const [cidadeData, setCidadeData]     = useState<LocationPoint[]>([])
+  const [estadoData, setEstadoData]         = useState<LocationPoint[]>([])
+  const [cidadeData, setCidadeData]         = useState<LocationPoint[]>([])
+  const [abandonedCount, setAbandonedCount] = useState<number>(0)
+  const [prevAbandonedCount, setPrevAbandonedCount] = useState<number>(0)
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
@@ -345,8 +347,20 @@ export default function Dashboard() {
       `?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
-    const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns] = await Promise.all([
-      salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise,
+    const abandonedQuery = supabase
+      .from('carrinho_abandonado')
+      .select('*', { count: 'exact', head: true })
+      .gte('data', start)
+      .lte('data', end)
+
+    const prevAbandonedQuery = supabase
+      .from('carrinho_abandonado')
+      .select('*', { count: 'exact', head: true })
+      .gte('data', prev_start)
+      .lte('data', prev_end)
+
+    const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns, abandonedRes, prevAbandonedRes] = await Promise.all([
+      salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedQuery, prevAbandonedQuery,
     ])
 
     // ── Calcular KPIs atuais ──
@@ -390,6 +404,8 @@ export default function Dashboard() {
 
     setKpis(currentKpis)
     setPrevKpis(prevKpisCalc)
+    setAbandonedCount(abandonedRes.count ?? 0)
+    setPrevAbandonedCount(prevAbandonedRes.count ?? 0)
 
     // ── Gráfico: receita diária (vendas) + gasto diário (Facebook) ──
     const revenueByDate: Record<string, number> = {}
@@ -587,7 +603,8 @@ export default function Dashboard() {
     { label: 'Imposto Meta',      value: formatCurrency(kpis.metaTax),      variation: null },
     { label: 'Vendas',            value: formatNumber(kpis.sales),          variation: variation(kpis.sales, prevKpis?.sales ?? 0) },
     { label: 'Compras FB',        value: formatNumber(kpis.fbPurchases),    variation: null },
-    { label: 'Ticket Médio',      value: formatCurrency(kpis.avgTicket),    variation: variation(kpis.avgTicket, prevKpis?.avgTicket ?? 0) },
+    { label: 'Ticket Médio',          value: formatCurrency(kpis.avgTicket),    variation: variation(kpis.avgTicket, prevKpis?.avgTicket ?? 0) },
+    { label: 'Carrinho Abandonado',   value: formatNumber(abandonedCount),      variation: variation(abandonedCount, prevAbandonedCount) },
   ] : []
 
   return (
