@@ -41,6 +41,7 @@ interface ProductPoint { name: string; count: number; pct: number }
 interface WeekdayPoint { day: string; count: number }
 interface DailyMetricsPoint { date: string; sales: number; roas: number; cpa: number }
 interface FunnelData { linkClicks: number; lpv: number; ic: number; purchases: number }
+interface LocationPoint { name: string; count: number; revenue: number; pct: number }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,8 @@ export default function Dashboard() {
   const [weekdayData, setWeekdayData]   = useState<WeekdayPoint[]>([])
   const [dailyMetrics, setDailyMetrics] = useState<DailyMetricsPoint[]>([])
   const [funnelData, setFunnelData]     = useState<FunnelData | null>(null)
+  const [estadoData, setEstadoData]     = useState<LocationPoint[]>([])
+  const [cidadeData, setCidadeData]     = useState<LocationPoint[]>([])
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
@@ -313,7 +316,7 @@ export default function Dashboard() {
     // ── Supabase: vendas do período atual ──
     const salesQuery = supabase
       .from('vendas')
-      .select('valor_venda, data, utm_source, horario, produto_comprado, metodo_de_pagamento')
+      .select('valor_venda, data, utm_source, horario, produto_comprado, metodo_de_pagamento, estado, cidade')
       .gte('data', start)
       .lte('data', end)
 
@@ -347,7 +350,7 @@ export default function Dashboard() {
     ])
 
     // ── Calcular KPIs atuais ──
-    const sales    = (salesRes.data ?? []) as Array<{ valor_venda: number; data: string; utm_source: string; horario: string; produto_comprado: string; metodo_de_pagamento: string }>
+    const sales    = (salesRes.data ?? []) as Array<{ valor_venda: number; data: string; utm_source: string; horario: string; produto_comprado: string; metodo_de_pagamento: string; estado: string; cidade: string }>
     const prevSalesArr = (prevSalesRes.data ?? []) as Array<{ valor_venda: number }>
 
     const grossRevenue = sales.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
@@ -501,6 +504,36 @@ export default function Dashboard() {
     const dayCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }
     sales.forEach(s => { if (s.data) { const d = new Date(s.data + 'T12:00:00'); dayCounts[d.getDay()] = (dayCounts[d.getDay()] ?? 0) + 1 } })
     setWeekdayData([1, 2, 3, 4, 5, 6, 0].map(i => ({ day: DAYS[i], count: dayCounts[i] })))
+
+    // ── Vendas por Estado ──
+    const estadoCounts: Record<string, { count: number; revenue: number }> = {}
+    sales.forEach(s => {
+      const key = s.estado?.trim() || 'N/A'
+      if (!estadoCounts[key]) estadoCounts[key] = { count: 0, revenue: 0 }
+      estadoCounts[key].count++
+      estadoCounts[key].revenue += s.valor_venda ?? 0
+    })
+    const totalForLoc = sales.length || 1
+    setEstadoData(
+      Object.entries(estadoCounts)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([name, { count, revenue }]) => ({ name, count, revenue, pct: (count / totalForLoc) * 100 }))
+    )
+
+    // ── Vendas por Cidade ──
+    const cidadeCounts: Record<string, { count: number; revenue: number }> = {}
+    sales.forEach(s => {
+      const key = s.cidade?.trim() || 'N/A'
+      if (!cidadeCounts[key]) cidadeCounts[key] = { count: 0, revenue: 0 }
+      cidadeCounts[key].count++
+      cidadeCounts[key].revenue += s.valor_venda ?? 0
+    })
+    setCidadeData(
+      Object.entries(cidadeCounts)
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 15)
+        .map(([name, { count, revenue }]) => ({ name, count, revenue, pct: (count / totalForLoc) * 100 }))
+    )
 
     // ── Top campanhas ──
     if (fbCampaigns?.data) {
@@ -894,6 +927,105 @@ export default function Dashboard() {
                   <Bar dataKey="count" name="Vendas" fill="#C8900A" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Vendas por Estado e Cidade */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Por Estado */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Vendas por Estado</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-6 space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : estadoData.length === 0 ? (
+              <div className="px-6 py-10 text-center text-[#4A6E52] text-sm">Sem dados de estado para o período.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#1B3D20]">
+                      {['Estado', 'Vendas', '%', 'Faturamento'].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-xs font-medium text-[#7AA880] uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estadoData.map((e, i) => (
+                      <tr key={e.name} className={`border-b border-[#1B3D20]/50 hover:bg-[#142918]/50 transition-colors ${i === estadoData.length - 1 ? 'border-0' : ''}`}>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#4DB848] flex-shrink-0" />
+                            <span className="text-[#E0EEE0] font-medium">{e.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-[#7AA880] whitespace-nowrap">{formatNumber(e.count)}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 h-1.5 bg-[#1B3D20] rounded-full overflow-hidden">
+                              <div className="h-full bg-[#4DB848] rounded-full" style={{ width: `${Math.min(e.pct, 100)}%` }} />
+                            </div>
+                            <span className="text-[#C8900A] font-semibold text-xs">{e.pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-[#C8900A] font-medium whitespace-nowrap">{formatCurrency(e.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Por Cidade */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Top Cidades</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-6 space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : cidadeData.length === 0 ? (
+              <div className="px-6 py-10 text-center text-[#4A6E52] text-sm">Sem dados de cidade para o período.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#1B3D20]">
+                      {['Cidade', 'Vendas', '%', 'Faturamento'].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-xs font-medium text-[#7AA880] uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cidadeData.map((c, i) => (
+                      <tr key={c.name} className={`border-b border-[#1B3D20]/50 hover:bg-[#142918]/50 transition-colors ${i === cidadeData.length - 1 ? 'border-0' : ''}`}>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#4A6E52] text-xs font-mono w-4 flex-shrink-0">{i + 1}</span>
+                            <span className="text-[#E0EEE0] font-medium truncate max-w-[160px]">{c.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-[#7AA880] whitespace-nowrap">{formatNumber(c.count)}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 h-1.5 bg-[#1B3D20] rounded-full overflow-hidden">
+                              <div className="h-full bg-[#C8900A] rounded-full" style={{ width: `${Math.min(c.pct, 100)}%` }} />
+                            </div>
+                            <span className="text-[#C8900A] font-semibold text-xs">{c.pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-[#C8900A] font-medium whitespace-nowrap">{formatCurrency(c.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CardContent>
         </Card>
