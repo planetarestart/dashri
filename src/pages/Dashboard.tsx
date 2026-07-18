@@ -350,14 +350,14 @@ export default function Dashboard() {
     const abandonedQuery = supabase
       .from('carrinho_abandonado')
       .select('*', { count: 'exact', head: true })
-      .gte('data', start)
-      .lte('data', end)
+      .gte('created_at', start)
+      .lte('created_at', end + 'T23:59:59')
 
     const prevAbandonedQuery = supabase
       .from('carrinho_abandonado')
       .select('*', { count: 'exact', head: true })
-      .gte('data', prev_start)
-      .lte('data', prev_end)
+      .gte('created_at', prev_start)
+      .lte('created_at', prev_end + 'T23:59:59')
 
     const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns, abandonedRes, prevAbandonedRes] = await Promise.all([
       salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedQuery, prevAbandonedQuery,
