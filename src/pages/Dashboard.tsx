@@ -349,18 +349,10 @@ export default function Dashboard() {
 
     const abandonedQuery = supabase
       .from('carrinho_abandonado')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', start)
-      .lte('created_at', end + 'T23:59:59')
+      .select('data')
 
-    const prevAbandonedQuery = supabase
-      .from('carrinho_abandonado')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', prev_start)
-      .lte('created_at', prev_end + 'T23:59:59')
-
-    const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns, abandonedRes, prevAbandonedRes] = await Promise.all([
-      salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedQuery, prevAbandonedQuery,
+    const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns, abandonedRes] = await Promise.all([
+      salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedQuery,
     ])
 
     // ── Calcular KPIs atuais ──
@@ -404,8 +396,10 @@ export default function Dashboard() {
 
     setKpis(currentKpis)
     setPrevKpis(prevKpisCalc)
-    setAbandonedCount(abandonedRes.count ?? 0)
-    setPrevAbandonedCount(prevAbandonedRes.count ?? 0)
+    const parseBR = (d: string) => { const [day, month, year] = d.split('/'); return `${year}-${month}-${day}` }
+    const allAbandoned = (abandonedRes.data ?? []) as Array<{ data: string }>
+    setAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= start && iso <= end }).length)
+    setPrevAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= prev_start && iso <= prev_end }).length)
 
     // ── Gráfico: receita diária (vendas) + gasto diário (Facebook) ──
     const revenueByDate: Record<string, number> = {}
