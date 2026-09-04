@@ -1,6 +1,7 @@
-import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Megaphone, ShoppingCart, Plug, Settings, X, Leaf } from 'lucide-react'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, Megaphone, ShoppingCart, Plug, Settings, X, Leaf, LogOut, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 
 interface SidebarProps {
   open: boolean
@@ -8,14 +9,22 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/campaigns', icon: Megaphone, label: 'Campanhas' },
-  { to: '/sales', icon: ShoppingCart, label: 'Vendas' },
-  { to: '/integrations', icon: Plug, label: 'Integrações' },
-  { to: '/settings', icon: Settings, label: 'Configurações' },
+  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'     },
+  { to: '/campaigns',  icon: Megaphone,        label: 'Campanhas'     },
+  { to: '/sales',      icon: ShoppingCart,     label: 'Vendas'        },
+  { to: '/financial',  icon: TrendingUp,       label: 'Financeiro'    },
+  { to: '/integrations', icon: Plug,           label: 'Integrações'   },
+  { to: '/settings',   icon: Settings,         label: 'Configurações' },
 ]
 
 export function Sidebar({ open, onClose }: SidebarProps) {
+  const navigate = useNavigate()
+
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    navigate('/login')
+  }
+
   return (
     <>
       {open && (
@@ -74,11 +83,18 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-[#1B3D20]">
+        <div className="p-4 border-t border-[#1B3D20] space-y-2">
           <div className="bg-[#061409] rounded-lg p-3 text-xs text-[#7AA880]">
             <p className="font-semibold text-[#4DB848] mb-0.5">Restart Intestinal</p>
             <p>Painel de Rastreamento</p>
           </div>
+          <button
+            onClick={handleSignOut}
+            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-[#7AA880] hover:text-red-400 hover:bg-red-400/10 transition-all duration-200"
+          >
+            <LogOut className="w-4 h-4" />
+            Sair
+          </button>
         </div>
       </aside>
     </>

@@ -176,7 +176,7 @@ function FacebookTab() {
 function TaxesTab() {
   const { toast } = useToast()
   const [taxes, setTaxes] = useState<Tax[]>([
-    { id: '1', name: 'Gateway (Monetizze)', type: 'percentage', value: 7.9, appliesTo: 'revenue' },
+    { id: '1', name: 'Gateway (Monetizze)', type: 'percentage', value: 4.9, appliesTo: 'revenue' },
     { id: '2', name: 'Comissão Afiliado', type: 'percentage', value: 30, appliesTo: 'commission' },
   ])
   const [modalOpen, setModalOpen] = useState(false)

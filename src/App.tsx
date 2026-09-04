@@ -1,18 +1,35 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Session } from '@supabase/supabase-js'
 import { Layout } from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Campaigns from './pages/Campaigns'
 import Sales from './pages/Sales'
+import Financial from './pages/Financial'
 import Integrations from './pages/Integrations'
 import Settings from './pages/Settings'
-import { syncSettings } from './lib/supabase'
+import Login from './pages/Login'
+import { supabase, syncSettings } from './lib/supabase'
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    syncSettings().finally(() => setReady(true))
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      if (data.session) {
+        syncSettings().finally(() => setReady(true))
+      } else {
+        setReady(true)
+      }
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   if (!ready) {
@@ -26,15 +43,25 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route element={<Layout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/campaigns" element={<Campaigns />} />
-          <Route path="/sales" element={<Sales />} />
-          <Route path="/integrations" element={<Integrations />} />
-          <Route path="/settings" element={<Settings />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="/login"
+          element={session ? <Navigate to="/dashboard" replace /> : <Login />}
+        />
+        <Route
+          path="/"
+          element={session ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
+        />
+        {session ? (
+          <Route element={<Layout />}>
+            <Route path="/dashboard"    element={<Dashboard />} />
+            <Route path="/campaigns"    element={<Campaigns />} />
+            <Route path="/sales"        element={<Sales />} />
+            <Route path="/financial"    element={<Financial />} />
+            <Route path="/integrations" element={<Integrations />} />
+            <Route path="/settings"     element={<Settings />} />
+          </Route>
+        ) : null}
+        <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />
       </Routes>
     </BrowserRouter>
   )

@@ -43,6 +43,62 @@ interface DailyMetricsPoint { date: string; sales: number; roas: number; cpa: nu
 interface FunnelData { linkClicks: number; lpv: number; ic: number; purchases: number }
 interface LocationPoint { name: string; count: number; revenue: number; pct: number }
 
+// ─── Paginação via fetch direto (contorna limite padrão do Supabase JS) ───────
+
+const SB_URL = import.meta.env.VITE_SUPABASE_URL as string
+const SB_KEY  = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
+async function getToken() {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token ?? SB_KEY
+}
+
+async function sbGet<T>(table: string, filters: [string, string][], select: string, offset: number): Promise<T[]> {
+  const token = await getToken()
+  const qs = new URLSearchParams()
+  qs.set('select', select)
+  qs.set('limit', '1000')
+  qs.set('offset', String(offset))
+  filters.forEach(([k, v]) => qs.append(k, v))
+  const res = await fetch(`${SB_URL}/rest/v1/${table}?${qs}`, {
+    headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` },
+  })
+  return res.json()
+}
+
+async function fetchAllPages<T>(table: string, filters: [string, string][], select: string): Promise<T[]> {
+  const all: T[] = []
+  let offset = 0
+  while (true) {
+    const page = await sbGet<T>(table, filters, select, offset)
+    if (!Array.isArray(page) || page.length === 0) break
+    all.push(...page)
+    if (page.length < 1000) break
+    offset += 1000
+  }
+  return all
+}
+
+type SaleRow = { valor_venda: number; data: string; utm_source: string; horario: string; produto_comprado: string; metodo_de_pagamento: string; estado: string; cidade: string }
+
+function fetchVendas(start: string, end: string) {
+  return fetchAllPages<SaleRow>('vendas',
+    [['data', `gte.${start}`], ['data', `lte.${end}`]],
+    'valor_venda,data,utm_source,horario,produto_comprado,metodo_de_pagamento,estado,cidade'
+  )
+}
+
+function fetchVendasPrev(start: string, end: string) {
+  return fetchAllPages<{ valor_venda: number }>('vendas',
+    [['data', `gte.${start}`], ['data', `lte.${end}`]],
+    'valor_venda'
+  )
+}
+
+function fetchCarrinhoAbandonado() {
+  return fetchAllPages<{ data: string }>('carrinho_abandonado', [], 'data')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getPeriodDates(
@@ -280,7 +336,7 @@ const DonutTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [period, setPeriod]           = useState<Period>('30d')
+  const [period, setPeriod]           = useState<Period>('maximum')
   const [loading, setLoading]           = useState(true)
   const [kpis, setKpis]                 = useState<KPIs | null>(null)
   const [prevKpis, setPrevKpis]         = useState<KPIs | null>(null)
@@ -315,19 +371,9 @@ export default function Dashboard() {
       ? (isCustom ? `time_range={"since":"${start}","until":"${end}"}` : `date_preset=last_30d`)
       : fbTimeParam
 
-    // ── Supabase: vendas do período atual ──
-    const salesQuery = supabase
-      .from('vendas')
-      .select('valor_venda, data, utm_source, horario, produto_comprado, metodo_de_pagamento, estado, cidade')
-      .gte('data', start)
-      .lte('data', end)
-
-    // ── Supabase: vendas do período anterior ──
-    const prevSalesQuery = supabase
-      .from('vendas')
-      .select('valor_venda')
-      .gte('data', prev_start)
-      .lte('data', prev_end)
+    // ── Supabase: vendas do período atual e anterior (com paginação) ──
+    const salesPromise     = fetchVendas(start, end)
+    const prevSalesPromise = fetchVendasPrev(prev_start, prev_end)
 
     // ── Facebook: insights de campanha ──
     const fbCampaignPromise = (token && accId) ? fetch(
@@ -347,17 +393,11 @@ export default function Dashboard() {
       `?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
-    const abandonedQuery = supabase
-      .from('carrinho_abandonado')
-      .select('data')
+    const abandonedPromise = fetchCarrinhoAbandonado()
 
-    const [salesRes, prevSalesRes, fbAll, fbDaily, fbCampaigns, abandonedRes] = await Promise.all([
-      salesQuery, prevSalesQuery, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedQuery,
+    const [sales, prevSalesArr, fbAll, fbDaily, fbCampaigns, allAbandoned] = await Promise.all([
+      salesPromise, prevSalesPromise, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedPromise,
     ])
-
-    // ── Calcular KPIs atuais ──
-    const sales    = (salesRes.data ?? []) as Array<{ valor_venda: number; data: string; utm_source: string; horario: string; produto_comprado: string; metodo_de_pagamento: string; estado: string; cidade: string }>
-    const prevSalesArr = (prevSalesRes.data ?? []) as Array<{ valor_venda: number }>
 
     const grossRevenue = sales.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
     const prevRevenue  = prevSalesArr.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
@@ -367,8 +407,8 @@ export default function Dashboard() {
     const metaTax   = fbMetrics.spend * 0.1215 // só o imposto Meta
     const acquisitions = sales.length > 0 ? sales.length : fbMetrics.purchases
 
-    // Lucro = Faturamento - taxa Monetizze 7.9% - Gasto com Ads (imposto incluso)
-    const profit     = grossRevenue - (grossRevenue * 0.079) - adSpend
+    // Lucro = Faturamento - taxa Monetizze 4.9% - Gasto com Ads (imposto incluso)
+    const profit     = grossRevenue - (grossRevenue * 0.049) - adSpend
     const prevProfit = prevRevenue  - (prevRevenue  * 0.079)
 
     const currentKpis: KPIs = {
@@ -397,7 +437,6 @@ export default function Dashboard() {
     setKpis(currentKpis)
     setPrevKpis(prevKpisCalc)
     const parseBR = (d: string) => { const [day, month, year] = d.split('/'); return `${year}-${month}-${day}` }
-    const allAbandoned = (abandonedRes.data ?? []) as Array<{ data: string }>
     setAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= start && iso <= end }).length)
     setPrevAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= prev_start && iso <= prev_end }).length)
 

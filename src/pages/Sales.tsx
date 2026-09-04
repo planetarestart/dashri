@@ -108,18 +108,38 @@ export default function Sales() {
     setError(null)
     const { start, end } = getDateRange(preset, cs, ce)
 
-    let query = supabase
-      .from('vendas')
-      .select('*')
-      .order('data', { ascending: false })
-      .order('horario', { ascending: false })
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const sbUrl = import.meta.env.VITE_SUPABASE_URL as string
+      const sbKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      const token = session?.access_token ?? sbKey
+      const headers = { apikey: sbKey, Authorization: `Bearer ${token}` }
 
-    if (start) query = query.gte('data', start)
-    if (end)   query = query.lte('data', end)
+      const PAGE = 1000
+      const all: VendaRow[] = []
+      let offset = 0
 
-    const { data, error: err } = await query
-    if (err) { setError(err.message); setLoading(false); return }
-    setAllSales((data ?? []) as VendaRow[])
+      while (true) {
+        const qs = new URLSearchParams()
+        qs.set('select', '*')
+        qs.set('order', 'data.desc,horario.desc')
+        qs.set('limit', String(PAGE))
+        qs.set('offset', String(offset))
+        if (start) qs.append('data', `gte.${start}`)
+        if (end)   qs.append('data', `lte.${end}`)
+
+        const res  = await fetch(`${sbUrl}/rest/v1/vendas?${qs}`, { headers })
+        const page: VendaRow[] = await res.json()
+        if (!Array.isArray(page) || page.length === 0) break
+        all.push(...page)
+        if (page.length < PAGE) break
+        offset += PAGE
+      }
+
+      setAllSales(all)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar vendas')
+    }
     setLoading(false)
   }, [])
 
