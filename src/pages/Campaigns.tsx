@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, AlertCircle, Search, WifiOff, History, DollarSign, Power, ImageIcon, Plus, Clock, Pencil, Check, X, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -128,12 +128,50 @@ function MetricCell({ value, highlight }: { value: string; highlight?: boolean }
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusToggle({ id, status, token, onStatusChange }: {
+  id: string
+  status: string
+  token: string
+  onStatusChange: (s: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr]   = useState('')
   const active = status === 'ACTIVE'
+
+  async function toggle(e: React.MouseEvent) {
+    e.stopPropagation()
+    const next = active ? 'PAUSED' : 'ACTIVE'
+    setBusy(true); setErr('')
+    try {
+      const body = new URLSearchParams({ status: next, access_token: token })
+      const res  = await fetch(`https://graph.facebook.com/v19.0/${id}`, { method: 'POST', body })
+      const data = await res.json() as Record<string, unknown>
+      if (data.error) throw new Error((data.error as Record<string,string>).message)
+      onStatusChange(next)
+    } catch (ex) { setErr(String(ex).replace('Error: ', '')) }
+    setBusy(false)
+  }
+
   return (
-    <Badge variant={active ? 'active' : 'paused'}>
-      {active ? 'Ativo' : 'Pausado'}
-    </Badge>
+    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      <Badge variant={active ? 'active' : 'paused'}>{active ? 'Ativo' : 'Pausado'}</Badge>
+      <button
+        onClick={toggle}
+        disabled={busy}
+        title={active ? 'Pausar' : 'Ativar'}
+        className={`p-1 rounded transition-colors disabled:opacity-50 ${
+          active
+            ? 'text-[#4DB848] hover:bg-[#4DB848]/20'
+            : 'text-gray-500 hover:bg-gray-400/20'
+        }`}
+      >
+        {busy
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <Power className="w-3.5 h-3.5" />
+        }
+      </button>
+      {err && <span className="text-[10px] text-red-400 max-w-[120px] leading-tight">{err}</span>}
+    </div>
   )
 }
 
@@ -162,7 +200,8 @@ function InsightCells({ ins }: { ins: FbInsights | null }) {
   )
 }
 
-function AdRow({ ad }: { ad: FbAd }) {
+function AdRow({ ad, token }: { ad: FbAd; token: string }) {
+  const [status, setStatus] = useState(ad.status)
   return (
     <tr className="border-b border-[#2d2d4a]/20 bg-[#08081a] hover:bg-[#0d0d20]">
       <td className="px-3 py-2 pl-20">
@@ -171,7 +210,9 @@ function AdRow({ ad }: { ad: FbAd }) {
           <span className="text-gray-400 text-xs truncate max-w-[200px]" title={ad.name}>{ad.name}</span>
         </div>
       </td>
-      <td className="px-3 py-2"><StatusBadge status={ad.status} /></td>
+      <td className="px-3 py-2">
+        <StatusToggle id={ad.id} status={status} token={token} onStatusChange={setStatus} />
+      </td>
       <td className="px-3 py-2 text-gray-600 text-sm">—</td>
       <InsightCells ins={ad.insights} />
     </tr>
@@ -187,9 +228,10 @@ function AdSetRow({
   customStart?: string
   customEnd?: string
 }) {
-  const [open, setOpen] = useState(false)
-  const [ads, setAds] = useState<FbAd[]>(adSet.ads ?? [])
-  const [loading, setLoading] = useState(false)
+  const [open, setOpen]           = useState(false)
+  const [ads, setAds]             = useState<FbAd[]>(adSet.ads ?? [])
+  const [loading, setLoading]     = useState(false)
+  const [adSetStatus, setAdSetStatus] = useState(adSet.status)
 
   async function handleExpand() {
     const next = !open
@@ -230,7 +272,9 @@ function AdSetRow({
             <span className="text-gray-300 text-xs truncate max-w-[200px]" title={adSet.name}>{adSet.name}</span>
           </div>
         </td>
-        <td className="px-3 py-2.5"><StatusBadge status={adSet.status} /></td>
+        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+          <StatusToggle id={adSet.id} status={adSetStatus} token={token} onStatusChange={setAdSetStatus} />
+        </td>
         <td className="px-3 py-2.5 text-gray-600 text-sm">—</td>
         <InsightCells ins={adSet.insights} />
       </tr>
@@ -241,7 +285,7 @@ function AdSetRow({
           </td>
         </tr>
       )}
-      {open && !loading && ads.map(ad => <AdRow key={ad.id} ad={ad} />)}
+      {open && !loading && ads.map(ad => <AdRow key={ad.id} ad={ad} token={token} />)}
     </>
   )
 }
@@ -255,9 +299,10 @@ function CampaignRow({
   customStart?: string
   customEnd?: string
 }) {
-  const [open, setOpen]     = useState(false)
-  const [adSets, setAdSets] = useState<FbAdSet[]>(campaign.adSets ?? [])
+  const [open, setOpen]       = useState(false)
+  const [adSets, setAdSets]   = useState<FbAdSet[]>(campaign.adSets ?? [])
   const [loading, setLoading] = useState(false)
+  const [campStatus, setCampStatus] = useState(campaign.status)
 
   const [budget, setBudget]         = useState(campaign.daily_budget)
   const [editing, setEditing]       = useState(false)
@@ -339,7 +384,9 @@ function CampaignRow({
             </span>
           </div>
         </td>
-        <td className="px-3 py-3"><StatusBadge status={campaign.status} /></td>
+        <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+          <StatusToggle id={campaign.id} status={campStatus} token={token} onStatusChange={setCampStatus} />
+        </td>
 
         {/* ─── Orçamento editável ─── */}
         <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
