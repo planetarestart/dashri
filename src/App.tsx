@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Session } from '@supabase/supabase-js'
+import type { Session } from '@supabase/supabase-js'
 import { Layout } from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Campaigns from './pages/Campaigns'

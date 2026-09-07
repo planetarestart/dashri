@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, ElementType } from 'react'
+import { useState, useEffect, useCallback, type ElementType } from 'react'
 import { TrendingDown, TrendingUp, DollarSign, Package, Truck, Percent } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, Cell } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -336,7 +336,7 @@ export default function Financial() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#1B3D20" vertical={false} />
                     <XAxis dataKey="name" tick={{ fill: '#7AA880', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: '#7AA880', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: number) => [formatCurrency(v), 'Custo']} contentStyle={{ background: '#0D2114', border: '1px solid #1B3D20', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#7AA880' }} itemStyle={{ color: '#E0EEE0' }} />
+                    <Tooltip formatter={(v) => [formatCurrency(Number(v)), 'Custo']} contentStyle={{ background: '#0D2114', border: '1px solid #1B3D20', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#7AA880' }} itemStyle={{ color: '#E0EEE0' }} />
                     <Bar dataKey="value" radius={[4,4,0,0]}>
                       {byCost.map((e, i) => (
                         <Cell key={i} fill={e.color} />
