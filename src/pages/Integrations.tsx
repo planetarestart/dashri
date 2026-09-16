@@ -85,6 +85,26 @@ export default function Integrations() {
     const savedId2   = getSetting('facebook_ad_account_id_2')
     const savedName2 = getSetting('facebook_ad_account_name_2')
     if (savedId2 && savedName2) setConnectedAccount2({ id: savedId2, name: savedName2 })
+
+    // Se já tem token salvo, carrega lista de contas automaticamente
+    const savedToken = getSetting('facebook_token')
+    if (savedToken) {
+      const all: AdAccount[] = []
+      const fetchAccounts = async (url: string | null) => {
+        while (url) {
+          const res  = await fetch(url).catch(() => null)
+          if (!res) break
+          const data = await res.json()
+          if (data.error || !data.data) break
+          all.push(...data.data)
+          url = data.paging?.next ?? null
+        }
+        all.sort((a, b) => a.name.localeCompare(b.name, 'pt'))
+        setAdAccounts(all)
+      }
+      fetchAccounts(`https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_id&limit=100&access_token=${savedToken}`)
+    }
+
     setLoadingStatus(false)
   }, [])
 
