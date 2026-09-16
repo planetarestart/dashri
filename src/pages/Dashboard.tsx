@@ -99,6 +99,13 @@ function fetchCarrinhoAbandonado() {
   return fetchAllPages<{ data: string }>('carrinho_abandonado', [], 'data')
 }
 
+function fetchVendasEduarda(start: string, end: string) {
+  return fetchAllPages<{ valor_venda: number; data: string }>('vendas',
+    [['data', `gte.${start}`], ['data', `lte.${end}`], ['afiliada', 'ilike.*eduarda*']],
+    'valor_venda,data'
+  )
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getPeriodDates(
@@ -353,6 +360,8 @@ export default function Dashboard() {
   const [cidadeData, setCidadeData]         = useState<LocationPoint[]>([])
   const [abandonedCount, setAbandonedCount] = useState<number>(0)
   const [prevAbandonedCount, setPrevAbandonedCount] = useState<number>(0)
+  const [eduardaConversao, setEduardaConversao] = useState<number>(0)
+  const [prevEduardaConversao, setPrevEduardaConversao] = useState<number>(0)
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
@@ -393,10 +402,12 @@ export default function Dashboard() {
       `?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20&access_token=${token}`
     ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
 
-    const abandonedPromise = fetchCarrinhoAbandonado()
+    const abandonedPromise      = fetchCarrinhoAbandonado()
+    const eduardaPromise        = fetchVendasEduarda(start, end)
+    const prevEduardaPromise    = fetchVendasEduarda(prev_start, prev_end)
 
-    const [sales, prevSalesArr, fbAll, fbDaily, fbCampaigns, allAbandoned] = await Promise.all([
-      salesPromise, prevSalesPromise, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedPromise,
+    const [sales, prevSalesArr, fbAll, fbDaily, fbCampaigns, allAbandoned, eduardaVendas, prevEduardaVendas] = await Promise.all([
+      salesPromise, prevSalesPromise, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedPromise, eduardaPromise, prevEduardaPromise,
     ])
 
     const grossRevenue = sales.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
@@ -437,8 +448,16 @@ export default function Dashboard() {
     setKpis(currentKpis)
     setPrevKpis(prevKpisCalc)
     const parseBR = (d: string) => { const [day, month, year] = d.split('/'); return `${year}-${month}-${day}` }
-    setAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= start && iso <= end }).length)
-    setPrevAbandonedCount(allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= prev_start && iso <= prev_end }).length)
+    const curAbandoned  = allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= start && iso <= end }).length
+    const prevAbandoned = allAbandoned.filter(r => { if (!r.data) return false; const iso = parseBR(r.data); return iso >= prev_start && iso <= prev_end }).length
+    setAbandonedCount(curAbandoned)
+    setPrevAbandonedCount(prevAbandoned)
+
+    // Conversão Carrinho Eduarda = vendas dela / carrinhos abandonados do período
+    const curEduarda  = eduardaVendas.length
+    const prevEduarda = prevEduardaVendas.length
+    setEduardaConversao(curAbandoned  > 0 ? (curEduarda  / curAbandoned)  * 100 : 0)
+    setPrevEduardaConversao(prevAbandoned > 0 ? (prevEduarda / prevAbandoned) * 100 : 0)
 
     // ── Gráfico: receita diária (vendas) + gasto diário (Facebook) ──
     const revenueByDate: Record<string, number> = {}
@@ -637,7 +656,8 @@ export default function Dashboard() {
     { label: 'Vendas',            value: formatNumber(kpis.sales),          variation: variation(kpis.sales, prevKpis?.sales ?? 0) },
     { label: 'Compras FB',        value: formatNumber(kpis.fbPurchases),    variation: null },
     { label: 'Ticket Médio',          value: formatCurrency(kpis.avgTicket),    variation: variation(kpis.avgTicket, prevKpis?.avgTicket ?? 0) },
-    { label: 'Carrinho Abandonado',   value: formatNumber(abandonedCount),      variation: variation(abandonedCount, prevAbandonedCount) },
+    { label: 'Carrinho Abandonado',        value: formatNumber(abandonedCount),               variation: variation(abandonedCount, prevAbandonedCount) },
+    { label: 'Conversão Carrinho Eduarda', value: `${eduardaConversao.toFixed(1)}%`,           variation: variation(eduardaConversao, prevEduardaConversao) },
   ] : []
 
   return (
