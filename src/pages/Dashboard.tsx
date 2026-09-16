@@ -370,6 +370,7 @@ export default function Dashboard() {
     const { start, end, prev_start, prev_end } = getPeriodDates(p, cs, ce)
     const token  = getSetting('facebook_token')
     const accId  = getSetting('facebook_ad_account_id')
+    const accId2 = getSetting('facebook_ad_account_id_2')
 
     // Parâmetro de tempo para a API do Facebook
     const isCustom = p === 'custom'
@@ -384,31 +385,103 @@ export default function Dashboard() {
     const salesPromise     = fetchVendas(start, end)
     const prevSalesPromise = fetchVendasPrev(prev_start, prev_end)
 
-    // ── Facebook: insights de campanha ──
-    const fbCampaignPromise = (token && accId) ? fetch(
-      `https://graph.facebook.com/v19.0/act_${accId}/insights` +
-      `?fields=${INSIGHT_FIELDS}&${fbTimeParam}&access_token=${token}`
-    ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
+    const fbFetch = (path: string) =>
+      fetch(`https://graph.facebook.com/v19.0/${path}&access_token=${token}`).then(r => r.json()).catch(() => null)
 
-    // ── Facebook: insights diários (para gráficos) ──
-    const fbDailyPromise = (token && accId) ? fetch(
-      `https://graph.facebook.com/v19.0/act_${accId}/insights` +
-      `?fields=spend,date_start,actions,purchase_roas,cost_per_action_type&time_increment=1&${fbDailyParam}&limit=60&access_token=${token}`
-    ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
+    // ── Facebook: insights de campanha ──
+    const fbCampaignPromise  = (token && accId) ? fbFetch(`act_${accId}/insights?fields=${INSIGHT_FIELDS}&${fbTimeParam}`) : Promise.resolve(null)
+    const fbCampaignPromise2 = (token && accId2) ? fbFetch(`act_${accId2}/insights?fields=${INSIGHT_FIELDS}&${fbTimeParam}`) : Promise.resolve(null)
+
+    // ── Facebook: insights diários ──
+    const fbDailyPromise  = (token && accId) ? fbFetch(`act_${accId}/insights?fields=spend,date_start,actions,purchase_roas,cost_per_action_type&time_increment=1&${fbDailyParam}&limit=60`) : Promise.resolve(null)
+    const fbDailyPromise2 = (token && accId2) ? fbFetch(`act_${accId2}/insights?fields=spend,date_start,actions,purchase_roas,cost_per_action_type&time_increment=1&${fbDailyParam}&limit=60`) : Promise.resolve(null)
 
     // ── Facebook: top campanhas ──
-    const fbCampaignsPromise = (token && accId) ? fetch(
-      `https://graph.facebook.com/v19.0/act_${accId}/campaigns` +
-      `?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20&access_token=${token}`
-    ).then(r => r.json()).catch(() => null) : Promise.resolve(null)
+    const fbCampaignsPromise  = (token && accId) ? fbFetch(`act_${accId}/campaigns?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20`) : Promise.resolve(null)
+    const fbCampaignsPromise2 = (token && accId2) ? fbFetch(`act_${accId2}/campaigns?fields=id,name,status,insights{${INSIGHT_FIELDS},${fbTimeParam}}&limit=20`) : Promise.resolve(null)
 
     const abandonedPromise      = fetchCarrinhoAbandonado()
     const eduardaPromise        = fetchVendasEduarda(start, end)
     const prevEduardaPromise    = fetchVendasEduarda(prev_start, prev_end)
 
-    const [sales, prevSalesArr, fbAll, fbDaily, fbCampaigns, allAbandoned, eduardaVendas, prevEduardaVendas] = await Promise.all([
-      salesPromise, prevSalesPromise, fbCampaignPromise, fbDailyPromise, fbCampaignsPromise, abandonedPromise, eduardaPromise, prevEduardaPromise,
+    const [sales, prevSalesArr, fbAll1, fbAll2, fbDaily1, fbDaily2, fbCampaigns1, fbCampaigns2, allAbandoned, eduardaVendas, prevEduardaVendas] = await Promise.all([
+      salesPromise, prevSalesPromise,
+      fbCampaignPromise, fbCampaignPromise2,
+      fbDailyPromise,   fbDailyPromise2,
+      fbCampaignsPromise, fbCampaignsPromise2,
+      abandonedPromise, eduardaPromise, prevEduardaPromise,
     ])
+
+    // ── Mescla dados das duas contas FB ──
+    type FbRow = Record<string, unknown>
+    function mergeActions(a1: FbRow[], a2: FbRow[]): FbRow[] {
+      const map: Record<string, number> = {}
+      const add = (arr: FbRow[], field: string) =>
+        (arr as Array<{ action_type: string; value: string }>).forEach(x => {
+          map[`${field}::${x.action_type}`] = (map[`${field}::${x.action_type}`] ?? 0) + parseFloat(x.value)
+        })
+      add(a1, 'v'); add(a2, 'v')
+      return []
+    }
+    void mergeActions // usado implicitamente abaixo via mergeInsightRows
+
+    function mergeInsightRows(r1: FbRow | null, r2: FbRow | null): FbRow | null {
+      if (!r1 && !r2) return null
+      if (!r1) return r2
+      if (!r2) return r1
+      const sumActions = (f: string): Array<{ action_type: string; value: string }> => {
+        const map: Record<string, number> = {}
+        const add = (row: FbRow) =>
+          ((row[f] ?? []) as Array<{ action_type: string; value: string }>)
+            .forEach(x => { map[x.action_type] = (map[x.action_type] ?? 0) + parseFloat(x.value) })
+        add(r1); add(r2)
+        return Object.entries(map).map(([action_type, value]) => ({ action_type, value: String(value) }))
+      }
+      const sumRoas = (): Array<{ action_type: string; value: string }> => {
+        const arr1 = (r1.purchase_roas ?? []) as Array<{ action_type: string; value: string }>
+        const arr2 = (r2.purchase_roas ?? []) as Array<{ action_type: string; value: string }>
+        const v1 = parseFloat(arr1[0]?.value ?? '0')
+        const v2 = parseFloat(arr2[0]?.value ?? '0')
+        const spend1 = parseFloat(r1.spend as string ?? '0')
+        const spend2 = parseFloat(r2.spend as string ?? '0')
+        const totalSpend = spend1 + spend2
+        const blended = totalSpend > 0 ? (v1 * spend1 + v2 * spend2) / totalSpend : 0
+        return blended > 0 ? [{ action_type: 'omni_purchase', value: String(blended) }] : []
+      }
+      return {
+        spend: String((parseFloat(r1.spend as string ?? '0') + parseFloat(r2.spend as string ?? '0'))),
+        impressions: String((parseInt(r1.impressions as string ?? '0') + parseInt(r2.impressions as string ?? '0'))),
+        clicks: String((parseInt(r1.clicks as string ?? '0') + parseInt(r2.clicks as string ?? '0'))),
+        actions: sumActions('actions'),
+        action_values: sumActions('action_values'),
+        cost_per_action_type: sumActions('cost_per_action_type'),
+        purchase_roas: sumRoas(),
+      }
+    }
+
+    const fbAllData1   = fbAll1?.data?.[0] as FbRow | undefined
+    const fbAllData2   = fbAll2?.data?.[0] as FbRow | undefined
+    const mergedInsight = mergeInsightRows(fbAllData1 ?? null, fbAllData2 ?? null)
+    const fbAll = mergedInsight ? { data: [mergedInsight] } : null
+
+    // Mescla daily por data
+    const dailyMap: Record<string, FbRow> = {}
+    const addDaily = (rows: FbRow[]) => rows.forEach(row => {
+      const d = row.date_start as string
+      if (!dailyMap[d]) { dailyMap[d] = { ...row }; return }
+      dailyMap[d] = mergeInsightRows(dailyMap[d], row) ?? row
+      ;(dailyMap[d] as Record<string, unknown>).date_start = d
+    })
+    if (fbDaily1?.data) addDaily(fbDaily1.data as FbRow[])
+    if (fbDaily2?.data) addDaily(fbDaily2.data as FbRow[])
+    const fbDaily = Object.keys(dailyMap).length > 0
+      ? { data: Object.values(dailyMap).sort((a, b) => (a.date_start as string).localeCompare(b.date_start as string)) }
+      : null
+
+    // Mescla campanhas (concatena)
+    const fbCampaigns = {
+      data: [...(fbCampaigns1?.data ?? []), ...(fbCampaigns2?.data ?? [])]
+    }
 
     const grossRevenue = sales.reduce((s, r) => s + (r.valor_venda ?? 0), 0)
     const prevRevenue  = prevSalesArr.reduce((s, r) => s + (r.valor_venda ?? 0), 0)

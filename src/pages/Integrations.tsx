@@ -73,13 +73,18 @@ export default function Integrations() {
   const [connecting, setConnecting] = useState(false)
   const [adAccounts, setAdAccounts] = useState<AdAccount[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
+  const [selectedAccount2, setSelectedAccount2] = useState('')
   const [connectedAccount, setConnectedAccount] = useState<{ name: string; id: string } | null>(null)
+  const [connectedAccount2, setConnectedAccount2] = useState<{ name: string; id: string } | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(true)
 
   useEffect(() => {
-    const savedId = getSetting('facebook_ad_account_id')
+    const savedId   = getSetting('facebook_ad_account_id')
     const savedName = getSetting('facebook_ad_account_name')
     if (savedId && savedName) setConnectedAccount({ id: savedId, name: savedName })
+    const savedId2   = getSetting('facebook_ad_account_id_2')
+    const savedName2 = getSetting('facebook_ad_account_name_2')
+    if (savedId2 && savedName2) setConnectedAccount2({ id: savedId2, name: savedName2 })
     setLoadingStatus(false)
   }, [])
 
@@ -120,17 +125,39 @@ export default function Integrations() {
     setSetting('facebook_ad_account_id', account.account_id)
     setSetting('facebook_ad_account_name', account.name)
     setConnectedAccount({ id: account.account_id, name: account.name })
-    toast({ title: 'Conta selecionada!', description: `${account.name} conectada com sucesso.` })
+    toast({ title: 'Conta principal selecionada!', description: `${account.name} conectada com sucesso.` })
+  }
+
+  function handleSelectAccount2(value: string) {
+    setSelectedAccount2(value)
+    const account = adAccounts.find((a) => a.account_id === value)
+    if (!account) return
+    setSetting('facebook_ad_account_id_2', account.account_id)
+    setSetting('facebook_ad_account_name_2', account.name)
+    setConnectedAccount2({ id: account.account_id, name: account.name })
+    toast({ title: 'Conta 2 selecionada!', description: `${account.name} adicionada com sucesso.` })
+  }
+
+  function handleDisconnectAccount2() {
+    deleteSetting('facebook_ad_account_id_2')
+    deleteSetting('facebook_ad_account_name_2')
+    setConnectedAccount2(null)
+    setSelectedAccount2('')
+    toast({ title: 'Conta 2 removida', description: 'Segunda conta de anúncios desconectada.' })
   }
 
   function handleDisconnect() {
     deleteSetting('facebook_token')
     deleteSetting('facebook_ad_account_id')
     deleteSetting('facebook_ad_account_name')
+    deleteSetting('facebook_ad_account_id_2')
+    deleteSetting('facebook_ad_account_name_2')
     setConnectedAccount(null)
+    setConnectedAccount2(null)
     setAdAccounts([])
     setToken('')
     setSelectedAccount('')
+    setSelectedAccount2('')
     toast({ title: 'Desconectado', description: 'Facebook Ads desconectado com sucesso.' })
   }
 
@@ -161,13 +188,52 @@ export default function Integrations() {
         <CardContent className="space-y-4">
           {connectedAccount ? (
             <div className="space-y-4">
-              <div className="bg-[#4DB848]/10 border border-[#4DB848]/20 rounded-lg p-4">
-                <p className="text-sm text-[#7AA880] mb-1">Conta conectada</p>
-                <p className="text-[#E0EEE0] font-semibold">{connectedAccount.name}</p>
-                <p className="text-[#7AA880] text-xs mt-0.5">ID: {connectedAccount.id}</p>
+              {/* Conta principal */}
+              <div>
+                <p className="text-xs text-[#7AA880] font-semibold uppercase tracking-wide mb-2">Conta Principal</p>
+                <div className="bg-[#4DB848]/10 border border-[#4DB848]/20 rounded-lg p-4">
+                  <p className="text-[#E0EEE0] font-semibold">{connectedAccount.name}</p>
+                  <p className="text-[#7AA880] text-xs mt-0.5">ID: {connectedAccount.id}</p>
+                </div>
               </div>
+
+              {/* Conta 2 */}
+              <div>
+                <p className="text-xs text-[#7AA880] font-semibold uppercase tracking-wide mb-2">Conta 2 (Restart)</p>
+                {connectedAccount2 ? (
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 bg-[#74B9FF]/10 border border-[#74B9FF]/20 rounded-lg p-4">
+                      <p className="text-[#E0EEE0] font-semibold">{connectedAccount2.name}</p>
+                      <p className="text-[#7AA880] text-xs mt-0.5">ID: {connectedAccount2.id}</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={handleDisconnectAccount2} className="shrink-0 mt-1">
+                      Remover
+                    </Button>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs text-[#4A6E52] mb-2">Selecione a segunda conta de anúncios (mesmo token):</p>
+                    <Select value={selectedAccount2} onValueChange={handleSelectAccount2}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Escolha a conta 2..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {adAccounts.filter(a => a.account_id !== connectedAccount.id).map((acc) => (
+                          <SelectItem key={acc.account_id} value={acc.account_id}>
+                            {acc.name} (ID: {acc.account_id})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {adAccounts.length === 0 && (
+                      <p className="text-xs text-[#4A6E52] mt-1">Reconecte o token para ver as contas disponíveis.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <Button variant="destructive" size="sm" onClick={handleDisconnect}>
-                Desconectar
+                Desconectar tudo
               </Button>
             </div>
           ) : (
@@ -193,7 +259,7 @@ export default function Integrations() {
 
               {adAccounts.length > 0 && (
                 <div>
-                  <p className="text-xs text-[#7AA880] mb-1.5">Selecione a conta de anúncio</p>
+                  <p className="text-xs text-[#7AA880] mb-1.5">Selecione a conta de anúncio principal</p>
                   <Select value={selectedAccount} onValueChange={handleSelectAccount}>
                     <SelectTrigger>
                       <SelectValue placeholder="Escolha uma conta..." />
