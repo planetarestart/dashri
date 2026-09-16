@@ -101,7 +101,7 @@ function fetchCarrinhoAbandonado() {
 
 function fetchVendasEduarda(start: string, end: string) {
   return fetchAllPages<{ valor_venda: number; data: string }>('vendas',
-    [['data', `gte.${start}`], ['data', `lte.${end}`], ['afiliada', 'ilike.*eduarda*']],
+    [['data', `gte.${start}`], ['data', `lte.${end}`], ['afiliado', 'ilike.*eduarda*']],
     'valor_venda,data'
   )
 }
