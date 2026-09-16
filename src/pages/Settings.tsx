@@ -363,14 +363,31 @@ function NotificacoesTab() {
           description: 'Habilite notificações nas configurações do navegador.',
           variant: 'destructive',
         })
+        setLoading(false)
         return
       }
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        await supabase.from('push_subscriptions').upsert(
-          { user_id: user.id, subscription: subscription.toJSON() },
-          { onConflict: 'user_id' }
-        )
+      const { data: { user }, error: authErr } = await supabase.auth.getUser()
+      if (authErr || !user) {
+        toast({
+          title: 'Não autenticado',
+          description: 'Faça login novamente para ativar notificações.',
+          variant: 'destructive',
+        })
+        setLoading(false)
+        return
+      }
+      const { error: upsertErr } = await supabase.from('push_subscriptions').upsert(
+        { user_id: user.id, subscription: subscription.toJSON() },
+        { onConflict: 'user_id' }
+      )
+      if (upsertErr) {
+        toast({
+          title: 'Erro ao salvar subscription',
+          description: upsertErr.message,
+          variant: 'destructive',
+        })
+        setLoading(false)
+        return
       }
       setSubscribed(true)
       toast({ title: 'Notificações ativadas!', description: 'Você receberá alertas mesmo com o app fechado.' })
