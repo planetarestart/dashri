@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Loader2, RefreshCw, Bell, BellOff, Smartphone } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,8 +8,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
-import { getSetting, setSetting } from '@/lib/supabase'
+import { getSetting, setSetting, supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
+import {
+  isPushSupported, getPermission, getSubscription,
+  requestPermissionAndSubscribe, unsubscribePush,
+} from '@/lib/push'
 import type { Tax } from '@/types'
 
 const TIMEZONES = [
@@ -324,6 +328,188 @@ function TaxesTab() {
   )
 }
 
+function NotificacoesTab() {
+  const { toast } = useToast()
+  const [supported, setSupported]   = useState(false)
+  const [permission, setPermission] = useState<NotificationPermission>('default')
+  const [subscribed, setSubscribed] = useState(false)
+  const [loading, setLoading]       = useState(false)
+  const [checking, setChecking]     = useState(true)
+
+  const isIOS        = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+
+  useEffect(() => {
+    const sup = isPushSupported()
+    setSupported(sup)
+    setPermission(getPermission())
+    if (sup) {
+      getSubscription()
+        .then(sub => setSubscribed(!!sub))
+        .finally(() => setChecking(false))
+    } else {
+      setChecking(false)
+    }
+  }, [])
+
+  async function handleEnable() {
+    setLoading(true)
+    try {
+      const { permission: perm, subscription } = await requestPermissionAndSubscribe()
+      setPermission(perm)
+      if (!subscription) {
+        toast({
+          title: 'Permissão negada',
+          description: 'Habilite notificações nas configurações do navegador.',
+          variant: 'destructive',
+        })
+        return
+      }
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('push_subscriptions').upsert(
+          { user_id: user.id, subscription: subscription.toJSON() },
+          { onConflict: 'user_id' }
+        )
+      }
+      setSubscribed(true)
+      toast({ title: 'Notificações ativadas!', description: 'Você receberá alertas mesmo com o app fechado.' })
+    } catch (err) {
+      toast({ title: 'Erro ao ativar', description: String(err), variant: 'destructive' })
+    }
+    setLoading(false)
+  }
+
+  async function handleDisable() {
+    setLoading(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('push_subscriptions').delete().eq('user_id', user.id)
+      }
+      await unsubscribePush()
+      setSubscribed(false)
+      toast({ title: 'Notificações desativadas.' })
+    } catch (err) {
+      toast({ title: 'Erro', description: String(err), variant: 'destructive' })
+    }
+    setLoading(false)
+  }
+
+  if (checking) {
+    return (
+      <Card>
+        <CardContent className="py-12 flex justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-[#4DB848]" />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (!supported) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center space-y-3">
+          <BellOff className="w-8 h-8 text-gray-500 mx-auto" />
+          <p className="text-[#E0EEE0] font-medium">Notificações não suportadas</p>
+          <p className="text-sm text-[#4A6E52]">Seu navegador não suporta Web Push. Use Chrome ou Safari 16.4+.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (isIOS && !isStandalone) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center space-y-3">
+          <Smartphone className="w-8 h-8 text-[#74B9FF] mx-auto" />
+          <div>
+            <p className="text-[#E0EEE0] font-medium mb-1">Instale o app primeiro (iOS)</p>
+            <p className="text-sm text-[#4A6E52]">
+              No Safari: toque em <strong className="text-[#E0EEE0]">Compartilhar</strong> →{' '}
+              <strong className="text-[#E0EEE0]">Adicionar à Tela de Início</strong>
+            </p>
+            <p className="text-xs text-[#4A6E52] mt-2">
+              Depois abra o app pela tela de início e ative as notificações aqui.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Bell className="w-4 h-4 text-[#4DB848]" />
+          Push Notifications
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Status */}
+        <div className="flex items-center justify-between p-4 rounded-lg bg-[#081208] border border-[#1B3D20]">
+          <div>
+            <p className="text-[#E0EEE0] font-medium">Alertas no celular / PC</p>
+            <p className="text-xs text-[#4A6E52] mt-0.5">
+              {subscribed
+                ? 'Ativo — você recebe alertas mesmo com o app fechado'
+                : 'Inativo — ative para receber alertas de novas vendas'}
+            </p>
+          </div>
+          <div className={`flex items-center gap-1.5 text-sm font-medium ${subscribed ? 'text-[#4DB848]' : 'text-gray-500'}`}>
+            <div className={`w-2 h-2 rounded-full ${subscribed ? 'bg-[#4DB848] animate-pulse' : 'bg-gray-600'}`} />
+            {subscribed ? 'Ativo' : 'Inativo'}
+          </div>
+        </div>
+
+        {permission === 'denied' && (
+          <div className="text-xs text-[#E94560] bg-[#E94560]/10 border border-[#E94560]/20 rounded-lg p-3">
+            Notificações estão bloqueadas. Vá em Configurações do navegador → Privacidade → Notificações → permita este site.
+          </div>
+        )}
+
+        {!subscribed ? (
+          <Button onClick={handleEnable} disabled={loading || permission === 'denied'}>
+            {loading
+              ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              : <Bell className="w-4 h-4 mr-2" />}
+            Ativar Notificações
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={handleDisable} disabled={loading}>
+            {loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            Desativar
+          </Button>
+        )}
+
+        {/* What triggers notifications */}
+        <div className="space-y-2 pt-3 border-t border-[#1B3D20]">
+          <p className="text-xs text-[#7AA880] font-semibold uppercase tracking-wide">Você será notificado sobre</p>
+          {[
+            'Nova venda realizada',
+            'Meta diária de vendas atingida',
+            'Campanha pausada automaticamente pelo Meta',
+          ].map(item => (
+            <div key={item} className="flex items-center gap-2 text-xs text-[#4A6E52]">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#4DB848] flex-shrink-0" />
+              {item}
+            </div>
+          ))}
+        </div>
+
+        {/* Platform info */}
+        <div className="text-xs text-[#4A6E52] bg-[#0d1f0d] rounded-lg p-3 space-y-1">
+          <p className="font-semibold text-[#7AA880]">Compatibilidade</p>
+          <p>✓ Android — Chrome / Edge (sem precisar instalar o app)</p>
+          <p>✓ iOS 16.4+ — Safari (requer instalação na tela de início)</p>
+          <p>✓ Windows / Mac — Chrome, Edge, Firefox</p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function Settings() {
   return (
     <div className="space-y-4">
@@ -333,10 +519,12 @@ export default function Settings() {
           <TabsTrigger value="general">Geral</TabsTrigger>
           <TabsTrigger value="facebook">Facebook Ads</TabsTrigger>
           <TabsTrigger value="taxes">Taxas</TabsTrigger>
+          <TabsTrigger value="notifications">Notificações</TabsTrigger>
         </TabsList>
         <TabsContent value="general"><GeneralTab /></TabsContent>
         <TabsContent value="facebook"><FacebookTab /></TabsContent>
         <TabsContent value="taxes"><TaxesTab /></TabsContent>
+        <TabsContent value="notifications"><NotificacoesTab /></TabsContent>
       </Tabs>
     </div>
   )

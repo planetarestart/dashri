@@ -92,12 +92,12 @@ export default function Integrations() {
       const all: AdAccount[] = []
       const fetchAccounts = async (url: string | null) => {
         while (url) {
-          const res  = await fetch(url).catch(() => null)
+          const res: Response | null = await fetch(url).catch(() => null)
           if (!res) break
-          const data = await res.json()
+          const data = await res.json() as Record<string, unknown>
           if (data.error || !data.data) break
-          all.push(...data.data)
-          url = data.paging?.next ?? null
+          all.push(...(data.data as AdAccount[]))
+          url = (data.paging as Record<string, string> | undefined)?.next ?? null
         }
         all.sort((a, b) => a.name.localeCompare(b.name, 'pt'))
         setAdAccounts(all)
@@ -120,11 +120,11 @@ export default function Integrations() {
         `https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_id&limit=100&access_token=${token.trim()}`
 
       while (url) {
-        const res = await fetch(url)
-        const data = await res.json()
-        if (data.error) throw new Error(data.error.message)
-        all.push(...(data.data ?? []))
-        url = data.paging?.next ?? null
+        const res: Response = await fetch(url)
+        const data = await res.json() as Record<string, unknown>
+        if (data.error) throw new Error((data.error as Record<string, string>).message)
+        all.push(...((data.data as AdAccount[]) ?? []))
+        url = (data.paging as Record<string, string> | undefined)?.next ?? null
       }
 
       all.sort((a, b) => a.name.localeCompare(b.name, 'pt'))
