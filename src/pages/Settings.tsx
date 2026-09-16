@@ -396,6 +396,43 @@ function NotificacoesTab() {
     setLoading(false)
   }
 
+  async function handleTest() {
+    // Primeiro tenta via Edge Function (push real); fallback para notificação local
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              title: '🚀 Restart Dashboard',
+              body: 'Notificações funcionando! Você receberá alertas de novas vendas.',
+              url: '/dashboard',
+            }),
+          }
+        )
+        if (res.ok) {
+          toast({ title: 'Notificação enviada!', description: 'Verifique seu dispositivo.' })
+          return
+        }
+      }
+    } catch { /* fallback abaixo */ }
+
+    // Fallback: notificação local (sem fechar o app)
+    if (Notification.permission === 'granted') {
+      new Notification('🚀 Restart Dashboard', {
+        body: 'Notificações funcionando! Você receberá alertas de novas vendas.',
+        icon: '/pwa-192x192.png',
+      })
+      toast({ title: 'Notificação local enviada!', description: 'A notificação push real requer a Edge Function deployada.' })
+    }
+  }
+
   if (checking) {
     return (
       <Card>
@@ -469,19 +506,27 @@ function NotificacoesTab() {
           </div>
         )}
 
-        {!subscribed ? (
-          <Button onClick={handleEnable} disabled={loading || permission === 'denied'}>
-            {loading
-              ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              : <Bell className="w-4 h-4 mr-2" />}
-            Ativar Notificações
-          </Button>
-        ) : (
-          <Button variant="outline" onClick={handleDisable} disabled={loading}>
-            {loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-            Desativar
-          </Button>
-        )}
+        <div className="flex gap-3 flex-wrap">
+          {!subscribed ? (
+            <Button onClick={handleEnable} disabled={loading || permission === 'denied'}>
+              {loading
+                ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                : <Bell className="w-4 h-4 mr-2" />}
+              Ativar Notificações
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={handleDisable} disabled={loading}>
+              {loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Desativar
+            </Button>
+          )}
+
+          {subscribed && (
+            <Button variant="secondary" onClick={handleTest} disabled={loading}>
+              Enviar teste
+            </Button>
+          )}
+        </div>
 
         {/* What triggers notifications */}
         <div className="space-y-2 pt-3 border-t border-[#1B3D20]">
