@@ -52,6 +52,7 @@ interface FbCampaign {
   insights: FbInsights | null
   adSets?: FbAdSet[]
   loadingAdSets?: boolean
+  accountLabel?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -379,9 +380,18 @@ function CampaignRow({
             {open
               ? <ChevronDown className="w-4 h-4 text-[#74B9FF] flex-shrink-0" />
               : <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0 group-hover:text-gray-300" />}
-            <span className="text-white font-medium text-sm truncate max-w-[220px]" title={campaign.name}>
+            <span className="text-white font-medium text-sm truncate max-w-[180px]" title={campaign.name}>
               {campaign.name}
             </span>
+            {campaign.accountLabel && (
+              <span className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                campaign.accountLabel === 'Conta 3'
+                  ? 'bg-[#74B9FF]/20 text-[#74B9FF]'
+                  : 'bg-[#4DB848]/20 text-[#4DB848]'
+              }`}>
+                {campaign.accountLabel}
+              </span>
+            )}
           </div>
         </td>
         <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
@@ -558,7 +568,7 @@ function parseExtraData(raw: string, eventType: string): string {
   } catch { return '' }
 }
 
-function ChangeHistory({ token, accountId }: { token: string; accountId: string }) {
+function ChangeHistory({ token, accountId, label }: { token: string; accountId: string; label?: string }) {
   const [activities, setActivities] = useState<ActivityEntry[]>([])
   const [loading, setLoading]       = useState(true)
   const [period, setPeriod]         = useState('last_7d')
@@ -590,7 +600,9 @@ function ChangeHistory({ token, accountId }: { token: string; accountId: string 
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#1B3D20]">
           <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-[#4DB848]" />
-            <span className="text-sm font-semibold text-[#E0EEE0]">Histórico de Alterações</span>
+            <span className="text-sm font-semibold text-[#E0EEE0]">
+              Histórico de Alterações{label ? ` — ${label}` : ''}
+            </span>
           </div>
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -659,38 +671,49 @@ function ChangeHistory({ token, accountId }: { token: string; accountId: string 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Campaigns() {
-  const [campaigns, setCampaigns] = useState<FbCampaign[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState<string | null>(null)
-  const [noConfig, setNoConfig]   = useState(false)
-  const [token, setToken]         = useState('')
-  const [accountId, setAccountId] = useState('')
-  const [search, setSearch]       = useState('')
+  const [campaigns, setCampaigns]   = useState<FbCampaign[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState<string | null>(null)
+  const [noConfig, setNoConfig]     = useState(false)
+  const [token, setToken]           = useState('')
+  const [accountId, setAccountId]   = useState('')
+  const [accountId2, setAccountId2] = useState<string | null>(null)
+  const [search, setSearch]         = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [datePreset, setDatePreset]     = useState('maximum')
   const [customStart, setCustomStart]   = useState('')
   const [customEnd, setCustomEnd]       = useState('')
 
-  const fetchCampaigns = useCallback(async (tok: string, accId: string, preset: string, cs?: string, ce?: string) => {
+  const fetchCampaigns = useCallback(async (
+    tok: string, accId: string, accId2: string | null,
+    preset: string, cs?: string, ce?: string
+  ) => {
     setLoading(true)
     setError(null)
     const insightsParam = preset === 'custom' && cs && ce
       ? `insights.time_range({"since":"${cs}","until":"${ce}"})`
       : `insights.date_preset(${preset})`
-    try {
-      const data = await fbFetch(
-        `https://graph.facebook.com/v19.0/act_${accId}/campaigns` +
-        `?fields=id,name,status,daily_budget,${insightsParam}{${INSIGHT_FIELDS}}` +
-        `&limit=100&access_token=${tok}`
-      )
-      const rows = (data.data as Record<string, unknown>[]) ?? []
-      setCampaigns(rows.map(r => ({
+    const buildUrl = (id: string) =>
+      `https://graph.facebook.com/v19.0/act_${id}/campaigns` +
+      `?fields=id,name,status,daily_budget,${insightsParam}{${INSIGHT_FIELDS}}` +
+      `&limit=100&access_token=${tok}`
+    const parseRows = (data: Record<string, unknown> | null, label: string): FbCampaign[] => {
+      if (!data) return []
+      return ((data.data as Record<string, unknown>[]) ?? []).map(r => ({
         id: r.id as string,
         name: r.name as string,
         status: r.status as string,
         daily_budget: parseInt(r.daily_budget as string ?? '0') / 100,
         insights: parseInsights((r.insights as Record<string, unknown>)?.data as Record<string, unknown>[]),
-      })))
+        accountLabel: label,
+      }))
+    }
+    try {
+      const [data1, data2] = await Promise.all([
+        fbFetch(buildUrl(accId)),
+        accId2 ? fbFetch(buildUrl(accId2)).catch(() => null) : Promise.resolve(null),
+      ])
+      setCampaigns([...parseRows(data1, 'Conta 1'), ...parseRows(data2, 'Conta 3')])
     } catch (e) {
       setError(String(e))
     }
@@ -698,23 +721,25 @@ export default function Campaigns() {
   }, [])
 
   useEffect(() => {
-    const tok = getSetting('facebook_token')
-    const acc = getSetting('facebook_ad_account_id')
+    const tok  = getSetting('facebook_token')
+    const acc  = getSetting('facebook_ad_account_id')
+    const acc2 = getSetting('facebook_ad_account_id_2') || null
     if (!tok || !acc) { setNoConfig(true); setLoading(false); return }
     setToken(tok)
     setAccountId(acc)
-    fetchCampaigns(tok, acc, datePreset)
+    setAccountId2(acc2)
+    fetchCampaigns(tok, acc, acc2, datePreset)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    if (token && accountId && datePreset !== 'custom') fetchCampaigns(token, accountId, datePreset)
+    if (token && accountId && datePreset !== 'custom') fetchCampaigns(token, accountId, accountId2, datePreset)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datePreset])
 
   function applyCustom() {
     if (token && accountId && customStart && customEnd && customStart <= customEnd) {
-      fetchCampaigns(token, accountId, 'custom', customStart, customEnd)
+      fetchCampaigns(token, accountId, accountId2, 'custom', customStart, customEnd)
     }
   }
 
@@ -854,7 +879,10 @@ export default function Campaigns() {
 
       {/* Histórico de Alterações */}
       {token && accountId && (
-        <ChangeHistory token={token} accountId={accountId} />
+        <ChangeHistory token={token} accountId={accountId} label={accountId2 ? 'Conta 1' : undefined} />
+      )}
+      {token && accountId2 && (
+        <ChangeHistory token={token} accountId={accountId2} label="Conta 3" />
       )}
     </div>
   )
