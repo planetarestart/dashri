@@ -1,42 +1,29 @@
-// Supabase Edge Function — envia push notifications para todos os subscribers
-// Deploy: supabase functions deploy send-push
+// Deploy: supabase functions deploy send-push --no-verify-jwt
 // Secret: supabase secrets set VAPID_PRIVATE_KEY=<sua_chave_privada_vapid>
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import webpush from 'npm:web-push@3.6.7'
 
 const VAPID_PUBLIC_KEY  = 'BOPG8YX6ifi_CZDDM91lAMhTdKM6aR-J0kQzdaCXTdDZwRlzIt_r45QWHw3uCpk4pSOR2TIVDizf5H53S2akbKM'
-const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!
-const VAPID_SUBJECT     = 'mailto:axagentes@gmail.com'
+const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY') ?? ''
 
-function base64urlToUint8Array(b64: string): Uint8Array {
-  const pad = '='.repeat((4 - b64.length % 4) % 4)
-  return Uint8Array.from(atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
-}
+webpush.setVapidDetails('mailto:axagentes@gmail.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
 
-async function buildVapidAuth(audience: string): Promise<string> {
-  const header  = btoa(JSON.stringify({ typ: 'JWT', alg: 'ES256' })).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  const payload = btoa(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: VAPID_SUBJECT }))
-    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-
-  const sigInput  = `${header}.${payload}`
-  const keyData   = base64urlToUint8Array(VAPID_PRIVATE_KEY)
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    keyData,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign']
-  )
-  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, cryptoKey, new TextEncoder().encode(sigInput))
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  const jwt = `${sigInput}.${sigB64}`
-
-  return `vapid t=${jwt},k=${VAPID_PUBLIC_KEY}`
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
 }
 
 serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+
+  if (!VAPID_PRIVATE_KEY) {
+    return new Response(JSON.stringify({ error: 'VAPID_PRIVATE_KEY secret não configurado' }), {
+      status: 500, headers: { 'Content-Type': 'application/json', ...CORS },
+    })
+  }
 
   const { title, body, url } = await req.json() as { title: string; body: string; url?: string }
 
@@ -46,40 +33,38 @@ serve(async (req) => {
   )
 
   const { data: subs, error } = await supabase.from('push_subscriptions').select('subscription')
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500, headers: { 'Content-Type': 'application/json', ...CORS },
+    })
+  }
+
+  if (!subs?.length) {
+    return new Response(JSON.stringify({ sent: 0, message: 'Nenhuma subscription encontrada. Ative as notificações no app primeiro.' }), {
+      status: 200, headers: { 'Content-Type': 'application/json', ...CORS },
+    })
+  }
 
   const payload = JSON.stringify({ title, body, url: url ?? '/dashboard', icon: '/pwa-192x192.png' })
-  const results: { endpoint: string; ok: boolean }[] = []
+  const results: { ok: boolean; error?: string }[] = []
 
-  for (const row of (subs ?? [])) {
-    const sub = row.subscription as { endpoint: string; keys: { auth: string; p256dh: string } }
+  for (const row of subs) {
     try {
-      const origin    = new URL(sub.endpoint).origin
-      const vapidAuth = await buildVapidAuth(origin)
-
-      const res = await fetch(sub.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type':   'application/octet-stream',
-          'TTL':            '86400',
-          'Authorization':  vapidAuth,
-          'Content-Encoding': 'aes128gcm',
-        },
-        body: new TextEncoder().encode(payload),
-      })
-      results.push({ endpoint: sub.endpoint, ok: res.ok })
-
-      // Remove subscriptions that are no longer valid
-      if (res.status === 410) {
-        await supabase.from('push_subscriptions').delete().eq('subscription->>endpoint', sub.endpoint)
-      }
+      await webpush.sendNotification(row.subscription as webpush.PushSubscription, payload)
+      results.push({ ok: true })
     } catch (e) {
-      results.push({ endpoint: sub.endpoint, ok: false })
-      console.error(e)
+      const err = e as { statusCode?: number }
+      if (err.statusCode === 410) {
+        // Subscription expirada — remove do banco
+        await supabase.from('push_subscriptions')
+          .delete()
+          .eq('subscription->>endpoint', (row.subscription as { endpoint: string }).endpoint)
+      }
+      results.push({ ok: false, error: String(e) })
     }
   }
 
-  return new Response(JSON.stringify({ sent: results.length, results }), {
-    headers: { 'Content-Type': 'application/json' },
+  return new Response(JSON.stringify({ sent: results.filter(r => r.ok).length, total: subs.length, results }), {
+    status: 200, headers: { 'Content-Type': 'application/json', ...CORS },
   })
 })
