@@ -1092,7 +1092,7 @@ export default function Dashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[#1B3D20]">
-                      {['Estado', 'Vendas', '%', 'Faturamento'].map(h => (
+                      {['Estado', 'Vendas', '%', 'Faturamento', 'Ticket Médio'].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-medium text-[#7AA880] uppercase tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1116,6 +1116,7 @@ export default function Dashboard() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-[#C8900A] font-medium whitespace-nowrap">{formatCurrency(e.revenue)}</td>
+                        <td className="px-4 py-2.5 text-[#7AA880] whitespace-nowrap">{formatCurrency(e.count > 0 ? e.revenue / e.count : 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1140,7 +1141,7 @@ export default function Dashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[#1B3D20]">
-                      {['Cidade', 'Vendas', '%', 'Faturamento'].map(h => (
+                      {['Cidade', 'Vendas', '%', 'Faturamento', 'Ticket Médio'].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-medium text-[#7AA880] uppercase tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1164,6 +1165,7 @@ export default function Dashboard() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-[#C8900A] font-medium whitespace-nowrap">{formatCurrency(c.revenue)}</td>
+                        <td className="px-4 py-2.5 text-[#7AA880] whitespace-nowrap">{formatCurrency(c.count > 0 ? c.revenue / c.count : 0)}</td>
                       </tr>
                     ))}
                   </tbody>
