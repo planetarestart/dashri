@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatNumber } from '@/lib/utils'
-import { getSetting } from '@/lib/supabase'
+import { getSetting, supabase } from '@/lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -461,6 +461,158 @@ function CampaignRow({
   )
 }
 
+// ─── UTM Sales (Supabase) ─────────────────────────────────────────────────────
+
+interface UtmAdNode    { name: string; sales: number; revenue: number }
+interface UtmAdSetNode { name: string; sales: number; revenue: number; ads: UtmAdNode[] }
+interface UtmCampNode  { name: string; sales: number; revenue: number; adSets: UtmAdSetNode[] }
+
+function fbPresetToRange(preset: string, cs?: string, ce?: string): { start?: string; end?: string } {
+  const fmt = (d: Date) => d.toISOString().split('T')[0]
+  const sub = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() - n); return r }
+  const t = new Date()
+  if (preset === 'today')      return { start: fmt(t), end: fmt(t) }
+  if (preset === 'yesterday')  { const y = sub(t, 1); return { start: fmt(y), end: fmt(y) } }
+  if (preset === 'last_7d')    return { start: fmt(sub(t, 7)),  end: fmt(t) }
+  if (preset === 'last_14d')   return { start: fmt(sub(t, 14)), end: fmt(t) }
+  if (preset === 'last_30d')   return { start: fmt(sub(t, 30)), end: fmt(t) }
+  if (preset === 'this_month') return { start: fmt(new Date(t.getFullYear(), t.getMonth(), 1)), end: fmt(t) }
+  if (preset === 'last_month') {
+    return {
+      start: fmt(new Date(t.getFullYear(), t.getMonth() - 1, 1)),
+      end:   fmt(new Date(t.getFullYear(), t.getMonth(), 0)),
+    }
+  }
+  if (preset === 'custom' && cs && ce) return { start: cs, end: ce }
+  return {}
+}
+
+function buildUtmTree(rows: { utm_campaign: string; utm_content: string; utm_term: string; valor_venda: number }[]): UtmCampNode[] {
+  const campMap = new Map<string, Map<string, Map<string, { sales: number; revenue: number }>>>()
+  for (const r of rows) {
+    const camp = r.utm_campaign?.trim() || '(sem campanha)'
+    const set  = r.utm_content?.trim()  || '(sem conjunto)'
+    const ad   = r.utm_term?.trim()     || '(sem anúncio)'
+    if (!campMap.has(camp)) campMap.set(camp, new Map())
+    const setMap = campMap.get(camp)!
+    if (!setMap.has(set)) setMap.set(set, new Map())
+    const adMap = setMap.get(set)!
+    const prev = adMap.get(ad) ?? { sales: 0, revenue: 0 }
+    adMap.set(ad, { sales: prev.sales + 1, revenue: prev.revenue + (r.valor_venda ?? 0) })
+  }
+  return Array.from(campMap.entries()).map(([camp, setMap]) => {
+    const adSets: UtmAdSetNode[] = Array.from(setMap.entries()).map(([set, adMap]) => {
+      const ads: UtmAdNode[] = Array.from(adMap.entries())
+        .map(([name, v]) => ({ name, ...v }))
+        .sort((a, b) => b.sales - a.sales)
+      return { name: set, sales: ads.reduce((s, a) => s + a.sales, 0), revenue: ads.reduce((s, a) => s + a.revenue, 0), ads }
+    }).sort((a, b) => b.sales - a.sales)
+    return { name: camp, sales: adSets.reduce((s, a) => s + a.sales, 0), revenue: adSets.reduce((s, a) => s + a.revenue, 0), adSets }
+  }).sort((a, b) => b.sales - a.sales)
+}
+
+function UtmSalesSection({ datePreset, customStart, customEnd }: { datePreset: string; customStart: string; customEnd: string }) {
+  const [tree, setTree]       = useState<UtmCampNode[]>([])
+  const [loading, setLoading] = useState(true)
+  const [open, setOpen]       = useState<Set<string>>(new Set())
+  const [openSet, setOpenSet] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    setLoading(true)
+    const { start, end } = fbPresetToRange(datePreset, customStart, customEnd)
+    let q = supabase.from('vendas').select('utm_campaign,utm_content,utm_term,valor_venda').neq('utm_campaign', '')
+    if (start) q = q.gte('data', start)
+    if (end)   q = q.lte('data', end)
+    q.then(({ data }) => {
+      setTree(buildUtmTree((data ?? []) as { utm_campaign: string; utm_content: string; utm_term: string; valor_venda: number }[]))
+      setLoading(false)
+    })
+  }, [datePreset, customStart, customEnd])
+
+  const toggleCamp  = (k: string) => setOpen(prev  => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s })
+  const toggleSet   = (k: string) => setOpenSet(prev => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s })
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1B3D20]">
+          <span className="text-sm font-semibold text-[#E0EEE0]">Vendas por UTM (Supabase)</span>
+          <span className="text-[10px] text-[#7AA880] ml-1">dados reais de pagamento, independente do pixel</span>
+        </div>
+        {loading ? (
+          <div className="p-4 space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+        ) : tree.length === 0 ? (
+          <div className="px-4 py-10 text-center text-[#4A6E52] text-sm">Nenhuma venda com UTM encontrada no período.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#2d2d4a] bg-[#0F0F23]">
+                  {['Campanha / Conjunto / Anúncio', 'Vendas', 'Faturamento', 'Ticket Médio'].map(h => (
+                    <th key={h} className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tree.map(camp => (
+                  <React.Fragment key={camp.name}>
+                    {/* Campaign row */}
+                    <tr className="border-b border-[#2d2d4a]/60 hover:bg-[#1f1f3a] cursor-pointer" onClick={() => toggleCamp(camp.name)}>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          {open.has(camp.name)
+                            ? <ChevronDown className="w-4 h-4 text-[#74B9FF] flex-shrink-0" />
+                            : <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />}
+                          <span className="text-white font-medium text-sm truncate max-w-[280px]" title={camp.name}>{camp.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-gray-200 font-semibold">{camp.sales}</td>
+                      <td className="px-3 py-2.5 text-[#00B894] font-semibold whitespace-nowrap">{formatCurrency(camp.revenue)}</td>
+                      <td className="px-3 py-2.5 text-gray-300 whitespace-nowrap">{formatCurrency(camp.sales > 0 ? camp.revenue / camp.sales : 0)}</td>
+                    </tr>
+                    {/* AdSet rows */}
+                    {open.has(camp.name) && camp.adSets.map(adSet => (
+                      <React.Fragment key={`${camp.name}|${adSet.name}`}>
+                        <tr className="border-b border-[#2d2d4a]/40 bg-[#0d0d28] hover:bg-[#111135] cursor-pointer" onClick={() => toggleSet(`${camp.name}|${adSet.name}`)}>
+                          <td className="px-3 py-2 pl-10">
+                            <div className="flex items-center gap-2">
+                              {openSet.has(`${camp.name}|${adSet.name}`)
+                                ? <ChevronDown className="w-3.5 h-3.5 text-[#74B9FF] flex-shrink-0" />
+                                : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
+                              <span className="text-gray-300 text-xs truncate max-w-[240px]" title={adSet.name}>{adSet.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-gray-300 text-xs">{adSet.sales}</td>
+                          <td className="px-3 py-2 text-[#7AA880] text-xs whitespace-nowrap">{formatCurrency(adSet.revenue)}</td>
+                          <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{formatCurrency(adSet.sales > 0 ? adSet.revenue / adSet.sales : 0)}</td>
+                        </tr>
+                        {/* Ad rows */}
+                        {openSet.has(`${camp.name}|${adSet.name}`) && adSet.ads.map(ad => (
+                          <tr key={`${camp.name}|${adSet.name}|${ad.name}`} className="border-b border-[#2d2d4a]/20 bg-[#08081a]">
+                            <td className="px-3 py-2 pl-20">
+                              <div className="flex items-center gap-2">
+                                <div className="w-1 h-1 rounded-full bg-gray-600 flex-shrink-0" />
+                                <span className="text-gray-400 text-xs truncate max-w-[200px]" title={ad.name}>{ad.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-gray-400 text-xs">{ad.sales}</td>
+                            <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{formatCurrency(ad.revenue)}</td>
+                            <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{formatCurrency(ad.sales > 0 ? ad.revenue / ad.sales : 0)}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Change History ───────────────────────────────────────────────────────────
 
 interface ActivityEntry {
@@ -876,6 +1028,9 @@ export default function Campaigns() {
           )}
         </CardContent>
       </Card>
+
+      {/* Vendas por UTM */}
+      <UtmSalesSection datePreset={datePreset} customStart={customStart} customEnd={customEnd} />
 
       {/* Histórico de Alterações */}
       {token && accountId && (
